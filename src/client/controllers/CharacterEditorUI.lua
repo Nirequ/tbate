@@ -88,29 +88,52 @@ local function GetCurrentHairColor()
 	return CharacterConfig.DEFAULT_CHARACTER.HairColor
 end
 
--- Continuously rotate the preview camera around the character.
-local function StartCameraRotation(viewport)
+-- Setup manual camera rotation with mouse drag
+local function SetupManualRotation(viewport)
 	if rotationConnection then
 		rotationConnection:Disconnect()
 		rotationConnection = nil
 	end
 
-	local angle = 0
+	local angle = math.pi -- Start facing forward
 	local radius = 8
-	local height = 2
+	local height = -2
+	local isDragging = false
+	local lastMouseX = 0
 
-	rotationConnection = RunService.RenderStepped:Connect(function(dt)
-		if not viewport or not viewport.Parent then
-			rotationConnection:Disconnect()
-			rotationConnection = nil
-			return
-		end
-		angle = angle + dt * 0.6
+	-- Update camera position
+	local function UpdateCamera()
 		local camera = viewport.CurrentCamera
 		if not camera then return end
 		local x = math.sin(angle) * radius
 		local z = math.cos(angle) * radius
 		camera.CFrame = CFrame.lookAt(Vector3.new(x, height, z), Vector3.new(0, height, 0))
+	end
+
+	-- Initial camera position
+	UpdateCamera()
+
+	-- Mouse drag to rotate
+	viewport.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			isDragging = true
+			lastMouseX = input.Position.X
+		end
+	end)
+
+	viewport.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			isDragging = false
+		end
+	end)
+
+	viewport.InputChanged:Connect(function(input)
+		if isDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+			local deltaX = input.Position.X - lastMouseX
+			lastMouseX = input.Position.X
+			angle = angle - deltaX * 0.01 -- Rotate based on mouse movement
+			UpdateCamera()
+		end
 	end)
 end
 
@@ -218,8 +241,9 @@ function CharacterEditorUI.UpdatePreview(previewPanel)
 		camera.Parent = previewPanel
 		previewPanel.CurrentCamera = camera
 	end
-	camera.CFrame = CFrame.lookAt(Vector3.new(0, 2, 8), Vector3.new(0, 2, 0))
-	StartCameraRotation(previewPanel)
+	
+	-- Setup manual rotation instead of auto-rotation
+	SetupManualRotation(previewPanel)
 
 	-- Update race label text
 	local previewPanelFrame = previewPanel.Parent

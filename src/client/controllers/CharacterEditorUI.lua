@@ -1,12 +1,23 @@
 -- UI Manager for character customization
 -- Allows player to select race, hairstyle, clothing and colors
+--
+-- Architecture (post-redesign):
+--   * The "preview" is the player's R6 character placed directly in the
+--     real Workspace (FilteringEnabled means only this client sees it),
+--     anchored on top of a Part named "PreviewSpot" or the SpawnLocation.
+--   * Workspace.CurrentCamera is locked into Scriptable mode and orbits
+--     the preview character; mouse drag rotates, scroll wheel zooms.
+--   * The UI itself is just a transparent right-hand options panel with
+--     mini-preview thumbnails for hair/clothing and an RGB+HEX color
+--     picker for skin/hair colour.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-local CharacterController = require(script.Parent.Parent.controllers.CharacterController)
 local CharacterConfig = require(Shared:WaitForChild("CharacterConfig"))
 
 local CharacterEditorUI = {}
@@ -14,15 +25,35 @@ local CharacterEditorUI = {}
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+local DEFAULT_SKIN = CharacterConfig.DEFAULT_CHARACTER.SkinColor or Color3.fromRGB(255, 204, 153)
+local DEFAULT_HAIR = CharacterConfig.DEFAULT_CHARACTER.HairColor or Color3.fromRGB(139, 69, 19)
+
 local currentRace = "Human"
 local currentHairstyle = 1
 local currentShirt = 1
 local currentPants = 1
-local currentSkinColorIndex = CharacterConfig.DEFAULT_CHARACTER.SkinColorIndex or 1
-local currentHairColorIndex = CharacterConfig.DEFAULT_CHARACTER.HairColorIndex or 1
-local previewCharacter = nil
-local previewTemplate = nil
-local rotationConnection = nil
+local currentSkinColor = DEFAULT_SKIN
+local currentHairColor = DEFAULT_HAIR
+
+-- World-preview character (lives in real Workspace, only this client sees it
+-- because FilteringEnabled is true and we parent it client-side).
+local worldCharacter = nil
+local worldCameraConnection = nil
+local originalCameraType = nil
+local originalCameraSubject = nil
+local cameraOrbitState = {
+	angle = math.pi,
+	height = 3,
+	distance = 8,
+	dragging = false,
+	lastMouseX = 0,
+	lastMouseY = 0,
+}
+
+local activeScreenGui = nil
+local optionsPanelRef = nil
+local skinPickerRef = nil
+local hairPickerRef = nil
 
 -- Hair-like accessory enum values that should be tinted by hair color
 local HAIR_ACCESSORY_TYPES = {
@@ -39,10 +70,7 @@ local R6_BODY_PARTS = {
 	["Right Leg"] = true,
 }
 
--- Directly set BasePart.Color on every R6 body part. We can't rely on
--- Humanoid:ApplyDescription inside a ViewportFrame (the humanoid isn't
--- parented to workspace, so the description colors don't always propagate
--- to the rendered parts) — manual coloring is rock-solid in any context.
+-- Directly set BasePart.Color on every R6 body part.
 local function SetSkinColor(character, color)
 	if not character or not color then return end
 	for _, child in ipairs(character:GetChildren()) do
@@ -52,57 +80,38 @@ local function SetSkinColor(character, color)
 	end
 end
 
--- Build a clean, blocky R6 humanoid rig from a HumanoidDescription
--- pre-populated with the default skin color so the rig is never rendered
--- pitch-black on first paint. A manually-placed PreviewDummy in
--- ReplicatedStorage.Shared still wins if present.
-local function GetPreviewTemplate()
-	if previewTemplate and previewTemplate.Parent == nil then
-		return previewTemplate
+-- Build a fresh blocky R6 rig with the given description applied. Used
+-- both for the in-world player preview and for the mini-preview thumbnails
+-- shown next to each hairstyle / clothing entry in the option list.
+local function BuildR6Rig(description)
+	description = description or Instance.new("HumanoidDescription")
+	if description.HeadColor == Color3.new(0, 0, 0) then
+		description.HeadColor = DEFAULT_SKIN
+		description.TorsoColor = DEFAULT_SKIN
+		description.LeftArmColor = DEFAULT_SKIN
+		description.RightArmColor = DEFAULT_SKIN
+		description.LeftLegColor = DEFAULT_SKIN
+		description.RightLegColor = DEFAULT_SKIN
 	end
-
-	local manual = Shared:FindFirstChild("PreviewDummy")
-	if manual then
-		previewTemplate = manual:Clone()
-		return previewTemplate
-	end
-
-	local description = Instance.new("HumanoidDescription")
-	-- Pre-populate the description with sane skin/hair colors so the rig
-	-- is built coloured rather than fully black (default Color3 is 0,0,0).
-	local defaultSkin = (CharacterConfig.SKIN_COLORS[1] and CharacterConfig.SKIN_COLORS[1].Color)
-		or CharacterConfig.DEFAULT_CHARACTER.SkinColor
-		or Color3.fromRGB(255, 220, 192)
-	description.HeadColor = defaultSkin
-	description.TorsoColor = defaultSkin
-	description.LeftArmColor = defaultSkin
-	description.RightArmColor = defaultSkin
-	description.LeftLegColor = defaultSkin
-	description.RightLegColor = defaultSkin
 
 	local ok, rig = pcall(function()
 		return Players:CreateHumanoidModelFromDescription(description, Enum.HumanoidRigType.R6)
 	end)
-	if ok and rig then
-		local humanoid = rig:FindFirstChildOfClass("Humanoid")
-		if humanoid then
-			humanoid.RigType = Enum.HumanoidRigType.R6
-		end
-		-- Belt-and-suspenders: explicitly colour body parts in case the
-		-- description colors didn't bake in (some Roblox versions do not
-		-- copy description colors into BasePart.Color on creation).
-		SetSkinColor(rig, defaultSkin)
-		previewTemplate = rig
-		return previewTemplate
+	if not ok or not rig then
+		warn("CharacterEditorUI: failed to build R6 rig:", rig)
+		return nil
 	end
 
-	warn("CharacterEditorUI: failed to build R6 preview rig:", rig)
-	return nil
+	local humanoid = rig:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.RigType = Enum.HumanoidRigType.R6
+		humanoid.WalkSpeed = 0
+		humanoid.JumpPower = 0
+	end
+	SetSkinColor(rig, description.HeadColor)
+	return rig
 end
 
--- Tint every hair-style accessory currently parented to the model.
--- We check both AccessoryType (modern API) and the accessory Name as a
--- fallback, because some legacy hair items have AccessoryType=Unknown.
 local function IsHairAccessory(accessory)
 	if HAIR_ACCESSORY_TYPES[accessory.AccessoryType] then
 		return true
@@ -118,9 +127,6 @@ local function TintHair(model, color)
 			for _, part in ipairs(descendant:GetDescendants()) do
 				if part:IsA("BasePart") or part:IsA("MeshPart") then
 					part.Color = color
-					-- A few catalog hair MeshParts also use TextureID with
-					-- a baked color — neutralising VertexColor helps the
-					-- new Color shine through.
 					if part:IsA("MeshPart") then
 						pcall(function() part.TextureID = part.TextureID end)
 					end
@@ -130,681 +136,981 @@ local function TintHair(model, color)
 	end
 end
 
--- Resolve current skin / hair colors from the palette indices.
-local function GetCurrentSkinColor()
-	local entry = CharacterConfig.SKIN_COLORS[currentSkinColorIndex]
-	if entry then return entry.Color end
-	return CharacterConfig.DEFAULT_CHARACTER.SkinColor
+-- Build a HumanoidDescription describing the *currently selected* combo
+-- of race / hair / clothing / colors. Used for the world preview and the
+-- final SaveCharacter payload.
+local function BuildCurrentDescription()
+	local description = Instance.new("HumanoidDescription")
+
+	local raceData = CharacterConfig.RACES[currentRace]
+	if raceData then
+		description.HeightScale = raceData.HeightScale
+		description.WidthScale = raceData.WidthScale
+		description.HeadScale = raceData.HeadScale
+		description.BodyTypeScale = raceData.BodyTypeScale
+	end
+
+	local hairstyle = CharacterConfig.HAIRSTYLES[currentHairstyle]
+	if hairstyle and hairstyle.AssetId and hairstyle.AssetId > 0 then
+		description.HairAccessory = tostring(hairstyle.AssetId)
+	end
+
+	local shirt = CharacterConfig.CLOTHING.Shirts[currentShirt]
+	if shirt and shirt.AssetId and shirt.AssetId > 0 then
+		description.Shirt = shirt.AssetId
+	end
+	local pants = CharacterConfig.CLOTHING.Pants[currentPants]
+	if pants and pants.AssetId and pants.AssetId > 0 then
+		description.Pants = pants.AssetId
+	end
+
+	description.HeadColor = currentSkinColor
+	description.TorsoColor = currentSkinColor
+	description.LeftArmColor = currentSkinColor
+	description.RightArmColor = currentSkinColor
+	description.LeftLegColor = currentSkinColor
+	description.RightLegColor = currentSkinColor
+
+	return description
 end
 
-local function GetCurrentHairColor()
-	local entry = CharacterConfig.HAIR_COLORS[currentHairColorIndex]
-	if entry then return entry.Color end
-	return CharacterConfig.DEFAULT_CHARACTER.HairColor
+-- Build a description for ONE single asset (just the hair, just the
+-- shirt, etc.) — used to render mini-preview thumbnails for the option
+-- list. Skin colour stays default so all minis look uniform.
+local function BuildSingleAssetDescription(kind, asset)
+	local description = Instance.new("HumanoidDescription")
+	description.HeadColor = DEFAULT_SKIN
+	description.TorsoColor = DEFAULT_SKIN
+	description.LeftArmColor = DEFAULT_SKIN
+	description.RightArmColor = DEFAULT_SKIN
+	description.LeftLegColor = DEFAULT_SKIN
+	description.RightLegColor = DEFAULT_SKIN
+
+	if asset and asset.AssetId and asset.AssetId > 0 then
+		if kind == "hair" then
+			description.HairAccessory = tostring(asset.AssetId)
+		elseif kind == "shirt" then
+			description.Shirt = asset.AssetId
+		elseif kind == "pants" then
+			description.Pants = asset.AssetId
+		end
+	end
+	return description
 end
 
--- Setup manual camera rotation with mouse drag
-local function SetupManualRotation(viewport)
-	if rotationConnection then
-		rotationConnection:Disconnect()
-		rotationConnection = nil
+-- Resolve the world anchor where the preview character should stand.
+local function GetPreviewAnchorCFrame()
+	local anchor = Workspace:FindFirstChild("PreviewSpot")
+	if anchor and anchor:IsA("BasePart") then
+		return anchor.CFrame + Vector3.new(0, 3, 0)
 	end
-
-	local angle = math.pi -- Start facing forward
-	local radius = 8
-	local height = -2
-	local isDragging = false
-	local lastMouseX = 0
-
-	-- Update camera position
-	local function UpdateCamera()
-		local camera = viewport.CurrentCamera
-		if not camera then return end
-		local x = math.sin(angle) * radius
-		local z = math.cos(angle) * radius
-		camera.CFrame = CFrame.lookAt(Vector3.new(x, height, z), Vector3.new(0, height, 0))
+	local spawn = Workspace:FindFirstChildOfClass("SpawnLocation")
+	if spawn then
+		return spawn.CFrame + Vector3.new(0, 3, 0)
 	end
-
-	-- Initial camera position
-	UpdateCamera()
-
-	-- Mouse drag to rotate
-	viewport.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			isDragging = true
-			lastMouseX = input.Position.X
-		end
-	end)
-
-	viewport.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			isDragging = false
-		end
-	end)
-
-	viewport.InputChanged:Connect(function(input)
-		if isDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-			local deltaX = input.Position.X - lastMouseX
-			lastMouseX = input.Position.X
-			angle = angle - deltaX * 0.01 -- Rotate based on mouse movement
-			UpdateCamera()
-		end
-	end)
+	return CFrame.new(0, 5, 0)
 end
 
--- Update preview character
-function CharacterEditorUI.UpdatePreview(previewPanel)
-	-- Remove old preview
-	if previewCharacter then
-		previewCharacter:Destroy()
-		previewCharacter = nil
+local function AnchorAllParts(model)
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = true
+			descendant.CanCollide = false
+		end
+	end
+end
+
+-- Spawn (or rebuild) the player-preview character directly in Workspace.
+function CharacterEditorUI.UpdatePreview()
+	local description = BuildCurrentDescription()
+
+	if worldCharacter then
+		worldCharacter:Destroy()
+		worldCharacter = nil
 	end
 
-	-- Ensure a WorldModel exists inside the ViewportFrame
-	local worldModel = previewPanel:FindFirstChildOfClass("WorldModel")
-	if not worldModel then
-		worldModel = Instance.new("WorldModel")
-		worldModel.Name = "WorldModel"
-		worldModel.Parent = previewPanel
-	end
-
-	local character = GetPreviewTemplate()
+	local character = BuildR6Rig(description)
 	if not character then
-		warn("CharacterEditorUI: cannot create preview character")
+		warn("CharacterEditorUI: cannot create world preview character")
 		return
 	end
-	-- GetPreviewTemplate may return the cached template directly; clone it
-	-- so the cache is preserved for the next update.
-	if character.Parent ~= nil and character.Parent ~= worldModel then
-		character = character:Clone()
-	elseif character == previewTemplate then
-		character = character:Clone()
-	end
-	character.Name = "PreviewCharacter"
+	character.Name = "TBATE_PreviewCharacter"
+	AnchorAllParts(character)
 
-	-- Place the rig at the origin inside the WorldModel.
 	local primary = character.PrimaryPart or character:FindFirstChild("HumanoidRootPart")
 	if primary then
 		character.PrimaryPart = primary
-		character:PivotTo(CFrame.new(0, 0, 0))
+		character:PivotTo(GetPreviewAnchorCFrame())
 	end
-	character.Parent = worldModel
-	previewCharacter = character
+	character.Parent = Workspace
+	worldCharacter = character
 
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then
-		warn("CharacterEditorUI: preview rig has no Humanoid")
-		return
-	end
-
-	local skinColor = GetCurrentSkinColor()
-	local hairColor = GetCurrentHairColor()
-
-	local success, err = pcall(function()
-		local description = humanoid:GetAppliedDescription()
-
-		-- 1. Race (scale)
-		local raceData = CharacterConfig.RACES[currentRace]
-		if raceData then
-			description.HeightScale = raceData.HeightScale
-			description.WidthScale = raceData.WidthScale
-			description.HeadScale = raceData.HeadScale
-			description.BodyTypeScale = raceData.BodyTypeScale
-		end
-
-		-- 2. Hairstyle
-		local hairstyle = CharacterConfig.HAIRSTYLES[currentHairstyle]
-		if hairstyle and hairstyle.AssetId and hairstyle.AssetId > 0 then
-			description.HairAccessory = tostring(hairstyle.AssetId)
-		else
-			description.HairAccessory = ""
-		end
-
-		-- 3. Clothing
-		local shirt = CharacterConfig.CLOTHING.Shirts[currentShirt]
-		if shirt and shirt.AssetId and shirt.AssetId > 0 then
-			description.Shirt = shirt.AssetId
-		end
-		local pants = CharacterConfig.CLOTHING.Pants[currentPants]
-		if pants and pants.AssetId and pants.AssetId > 0 then
-			description.Pants = pants.AssetId
-		end
-
-		-- 4. Skin color (also written into description for non-preview
-		-- callers; the preview also paints parts directly below).
-		description.HeadColor = skinColor
-		description.TorsoColor = skinColor
-		description.LeftArmColor = skinColor
-		description.RightArmColor = skinColor
-		description.LeftLegColor = skinColor
-		description.RightLegColor = skinColor
-
-		humanoid:ApplyDescription(description)
-	end)
-
-	if not success then
-		warn("CharacterEditorUI: failed to apply description:", err)
-	end
-
-	-- ApplyDescription does not always color body parts when the rig is
-	-- inside a ViewportFrame's WorldModel, so paint them directly.
-	SetSkinColor(character, skinColor)
-
-	-- Hair color is applied after ApplyDescription so it overrides the
-	-- accessory's stock color. The accessory is added asynchronously by
-	-- ApplyDescription, so we tint it now AND again on a few frames later
-	-- to catch the late insertion. We also re-tint whenever a new
-	-- descendant of type Accessory appears.
-	TintHair(character, hairColor)
-	for _, delaySeconds in ipairs({0.1, 0.5, 1.5}) do
+	SetSkinColor(character, currentSkinColor)
+	TintHair(character, currentHairColor)
+	for _, delaySeconds in ipairs({0.1, 0.5, 1.5, 3.0}) do
 		task.delay(delaySeconds, function()
 			if character.Parent then
-				TintHair(character, hairColor)
+				TintHair(character, currentHairColor)
+				AnchorAllParts(character)
 			end
 		end)
 	end
 	character.DescendantAdded:Connect(function(descendant)
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = true
+			descendant.CanCollide = false
+		end
 		if descendant:IsA("Accessory") and IsHairAccessory(descendant) then
-			task.defer(TintHair, character, hairColor)
+			task.defer(TintHair, character, currentHairColor)
 		end
 	end)
-
-	-- Camera setup
-	local camera = previewPanel.CurrentCamera
-	if not camera then
-		camera = Instance.new("Camera")
-		camera.Parent = previewPanel
-		previewPanel.CurrentCamera = camera
-	end
-	
-	-- Setup manual rotation instead of auto-rotation
-	SetupManualRotation(previewPanel)
-
-	-- Update race label text
-	local previewPanelFrame = previewPanel.Parent
-	if previewPanelFrame then
-		local raceLabel = previewPanelFrame:FindFirstChild("RaceLabel")
-		if raceLabel then
-			local raceData = CharacterConfig.RACES[currentRace]
-			raceLabel.Text = raceData and raceData.Name or currentRace
-		end
-	end
-
-	print("Preview updated for race:", currentRace)
 end
 
--- Create character editor UI
-function CharacterEditorUI.CreateUI()
-	-- Create ScreenGui
-	local screenGui = Instance.new("ScreenGui")
-	screenGui.Name = "CharacterEditorUI"
-	screenGui.ResetOnSpawn = false
-	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	
-	-- Background frame
-	local background = Instance.new("Frame")
-	background.Name = "Background"
-	background.Size = UDim2.new(1, 0, 1, 0)
-	background.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
-	background.BorderSizePixel = 0
-	background.Parent = screenGui
-	
-	-- Title
-	local title = Instance.new("TextLabel")
-	title.Name = "Title"
-	title.Size = UDim2.new(0, 600, 0, 80)
-	title.Position = UDim2.new(0.5, -300, 0.05, 0)
-	title.BackgroundTransparency = 1
-	title.Text = "СОЗДАНИЕ ПЕРСОНАЖА"
-	title.TextColor3 = Color3.fromRGB(255, 255, 255)
-	title.TextSize = 36
-	title.Font = Enum.Font.GothamBold
-	title.Parent = background
-	
-	-- Left panel - Character preview
-	local previewPanel = Instance.new("Frame")
-	previewPanel.Name = "PreviewPanel"
-	previewPanel.Size = UDim2.new(0, 400, 0, 600)
-	previewPanel.Position = UDim2.new(0.1, 0, 0.2, 0)
-	previewPanel.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
-	previewPanel.BorderSizePixel = 0
-	previewPanel.Parent = background
-	
-	local previewCorner = Instance.new("UICorner")
-	previewCorner.CornerRadius = UDim.new(0, 12)
-	previewCorner.Parent = previewPanel
-	
-	-- Preview title
-	local previewTitle = Instance.new("TextLabel")
-	previewTitle.Name = "PreviewTitle"
-	previewTitle.Size = UDim2.new(1, 0, 0, 50)
-	previewTitle.BackgroundTransparency = 1
-	previewTitle.Text = "Предпросмотр"
-	previewTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-	previewTitle.TextSize = 24
-	previewTitle.Font = Enum.Font.GothamBold
-	previewTitle.Parent = previewPanel
-	
-	-- Race label
-	local raceLabel = Instance.new("TextLabel")
-	raceLabel.Name = "RaceLabel"
-	raceLabel.Size = UDim2.new(1, 0, 0, 40)
-	raceLabel.Position = UDim2.new(0, 0, 0, 50)
-	raceLabel.BackgroundTransparency = 1
-	raceLabel.Text = "Человек"
-	raceLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-	raceLabel.TextSize = 20
-	raceLabel.Font = Enum.Font.Gotham
-	raceLabel.Parent = previewPanel
-	
-	-- ViewportFrame for 3D preview
-	local viewport = Instance.new("ViewportFrame")
-	viewport.Name = "Viewport"
-	viewport.Size = UDim2.new(1, -40, 1, -140)
-	viewport.Position = UDim2.new(0, 20, 0, 100)
-	viewport.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-	viewport.BorderSizePixel = 0
-	viewport.Parent = previewPanel
-	
-	local viewportCorner = Instance.new("UICorner")
-	viewportCorner.CornerRadius = UDim.new(0, 8)
-	viewportCorner.Parent = viewport
-	
-	-- Camera for viewport
-	local camera = Instance.new("Camera")
-	camera.CFrame = CFrame.new(0, 2, 8) * CFrame.Angles(0, math.rad(180), 0)
-	camera.Parent = viewport
-	viewport.CurrentCamera = camera
-	
-	-- Initial preview
-	CharacterEditorUI.UpdatePreview(viewport)
-	
-	-- Right panel - Customization options
-	local optionsPanel = Instance.new("ScrollingFrame")
-	optionsPanel.Name = "OptionsPanel"
-	optionsPanel.Size = UDim2.new(0, 500, 0, 600)
-	optionsPanel.Position = UDim2.new(0.55, 0, 0.2, 0)
-	optionsPanel.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
-	optionsPanel.BorderSizePixel = 0
-	optionsPanel.ScrollBarThickness = 8
-	optionsPanel.CanvasSize = UDim2.new(0, 0, 0, 1000)
-	optionsPanel.Parent = background
-	
-	local optionsCorner = Instance.new("UICorner")
-	optionsCorner.CornerRadius = UDim.new(0, 12)
-	optionsCorner.Parent = optionsPanel
-	
-	local optionsLayout = Instance.new("UIListLayout")
-	optionsLayout.Padding = UDim.new(0, 20)
-	optionsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	optionsLayout.Parent = optionsPanel
-	
-	-- Spacer at top
-	local topSpacer = Instance.new("Frame")
-	topSpacer.Size = UDim2.new(1, 0, 0, 10)
-	topSpacer.BackgroundTransparency = 1
-	topSpacer.Parent = optionsPanel
-	
-	-- Race selection
-	CharacterEditorUI.CreateSection(optionsPanel, "РАСА", function(container)
-		for raceName, raceData in pairs(CharacterConfig.RACES) do
-			local button = CharacterEditorUI.CreateOptionButton(raceName, raceData.Name)
-			button.Parent = container
-		end
-	end)
-	
-	-- Hairstyle selection
-	CharacterEditorUI.CreateSection(optionsPanel, "ПРИЧЕСКА", function(container)
-		for i, hairstyle in ipairs(CharacterConfig.HAIRSTYLES) do
-			local button = CharacterEditorUI.CreateOptionButton("Hairstyle" .. i, hairstyle.Name)
-			button.Parent = container
-		end
-	end)
-	
-	-- Shirt selection
-	CharacterEditorUI.CreateSection(optionsPanel, "РУБАШКА", function(container)
-		for i, shirt in ipairs(CharacterConfig.CLOTHING.Shirts) do
-			local button = CharacterEditorUI.CreateOptionButton("Shirt" .. i, shirt.Name)
-			button.Parent = container
-		end
-	end)
-	
-	-- Pants selection
-	CharacterEditorUI.CreateSection(optionsPanel, "ШТАНЫ", function(container)
-		for i, pants in ipairs(CharacterConfig.CLOTHING.Pants) do
-			local button = CharacterEditorUI.CreateOptionButton("Pants" .. i, pants.Name)
-			button.Parent = container
-		end
-	end)
+-- =================================================================
+-- Orbit camera around the workspace preview character.
+-- =================================================================
+local function UpdateOrbitCamera()
+	local camera = Workspace.CurrentCamera
+	if not camera or not worldCharacter then return end
 
-	-- Skin color selection
-	CharacterEditorUI.CreateSection(optionsPanel, "ЦВЕТ КОЖИ", function(container)
-		for i, swatch in ipairs(CharacterConfig.SKIN_COLORS) do
-			local button = CharacterEditorUI.CreateColorButton("Skin" .. i, swatch.Name, swatch.Color)
-			button.Parent = container
-		end
-	end)
+	local primary = worldCharacter.PrimaryPart or worldCharacter:FindFirstChild("HumanoidRootPart")
+	if not primary then return end
 
-	-- Hair color selection
-	CharacterEditorUI.CreateSection(optionsPanel, "ЦВЕТ ВОЛОС", function(container)
-		for i, swatch in ipairs(CharacterConfig.HAIR_COLORS) do
-			local button = CharacterEditorUI.CreateColorButton("Hair" .. i, swatch.Name, swatch.Color)
-			button.Parent = container
-		end
-	end)
-
-	-- Grow the scrolling canvas to fit the new sections
-	optionsPanel.CanvasSize = UDim2.new(0, 0, 0, 1500)
-
-	
-	-- Bottom buttons
-	local buttonsContainer = Instance.new("Frame")
-	buttonsContainer.Name = "ButtonsContainer"
-	buttonsContainer.Size = UDim2.new(0, 500, 0, 60)
-	buttonsContainer.Position = UDim2.new(0.5, -250, 0.9, 0)
-	buttonsContainer.BackgroundTransparency = 1
-	buttonsContainer.Parent = background
-	
-	-- Back button
-	local backButton = Instance.new("TextButton")
-	backButton.Name = "BackButton"
-	backButton.Size = UDim2.new(0, 230, 0, 50)
-	backButton.Position = UDim2.new(0, 0, 0, 0)
-	backButton.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
-	backButton.Text = "НАЗАД"
-	backButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-	backButton.TextSize = 20
-	backButton.Font = Enum.Font.GothamBold
-	backButton.Parent = buttonsContainer
-	
-	local backCorner = Instance.new("UICorner")
-	backCorner.CornerRadius = UDim.new(0, 8)
-	backCorner.Parent = backButton
-	
-	-- Confirm button
-	local confirmButton = Instance.new("TextButton")
-	confirmButton.Name = "ConfirmButton"
-	confirmButton.Size = UDim2.new(0, 230, 0, 50)
-	confirmButton.Position = UDim2.new(1, -230, 0, 0)
-	confirmButton.BackgroundColor3 = Color3.fromRGB(60, 150, 60)
-	confirmButton.Text = "ПОДТВЕРДИТЬ"
-	confirmButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-	confirmButton.TextSize = 20
-	confirmButton.Font = Enum.Font.GothamBold
-	confirmButton.Parent = buttonsContainer
-	
-	local confirmCorner = Instance.new("UICorner")
-	confirmCorner.CornerRadius = UDim.new(0, 8)
-	confirmCorner.Parent = confirmButton
-	
-	screenGui.Parent = playerGui
-	return screenGui
+	local target = primary.Position + Vector3.new(0, 0.5, 0)
+	local x = math.sin(cameraOrbitState.angle) * cameraOrbitState.distance
+	local z = math.cos(cameraOrbitState.angle) * cameraOrbitState.distance
+	local cameraPosition = target + Vector3.new(x, cameraOrbitState.height, z)
+	camera.CFrame = CFrame.lookAt(cameraPosition, target)
 end
 
--- Create a customization section
-function CharacterEditorUI.CreateSection(parent, title, createOptions)
+local cameraInputConnections = {}
+
+local function DisconnectInputConnections()
+	for _, conn in ipairs(cameraInputConnections) do
+		if conn.Connected then conn:Disconnect() end
+	end
+	cameraInputConnections = {}
+end
+
+local function SetupOrbitCamera()
+	local camera = Workspace.CurrentCamera
+	if not camera then return end
+
+	if originalCameraType == nil then
+		originalCameraType = camera.CameraType
+		originalCameraSubject = camera.CameraSubject
+	end
+	camera.CameraType = Enum.CameraType.Scriptable
+
+	if worldCameraConnection then
+		worldCameraConnection:Disconnect()
+		worldCameraConnection = nil
+	end
+	DisconnectInputConnections()
+
+	UpdateOrbitCamera()
+
+	worldCameraConnection = RunService.RenderStepped:Connect(function()
+		UpdateOrbitCamera()
+	end)
+
+	table.insert(cameraInputConnections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		if input.UserInputType == Enum.UserInputType.MouseButton2
+			or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			cameraOrbitState.dragging = true
+			cameraOrbitState.lastMouseX = input.Position.X
+			cameraOrbitState.lastMouseY = input.Position.Y
+		end
+	end))
+	table.insert(cameraInputConnections, UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton2
+			or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			cameraOrbitState.dragging = false
+		end
+	end))
+	table.insert(cameraInputConnections, UserInputService.InputChanged:Connect(function(input, gameProcessed)
+		if input.UserInputType == Enum.UserInputType.MouseMovement and cameraOrbitState.dragging then
+			local dx = input.Position.X - cameraOrbitState.lastMouseX
+			local dy = input.Position.Y - cameraOrbitState.lastMouseY
+			cameraOrbitState.lastMouseX = input.Position.X
+			cameraOrbitState.lastMouseY = input.Position.Y
+			cameraOrbitState.angle = cameraOrbitState.angle - dx * 0.01
+			cameraOrbitState.height = math.clamp(cameraOrbitState.height + dy * 0.05, -2, 8)
+		elseif input.UserInputType == Enum.UserInputType.MouseWheel and not gameProcessed then
+			cameraOrbitState.distance = math.clamp(
+				cameraOrbitState.distance - input.Position.Z,
+				3, 20)
+		end
+	end))
+end
+
+local function RestoreCamera()
+	if worldCameraConnection then
+		worldCameraConnection:Disconnect()
+		worldCameraConnection = nil
+	end
+	DisconnectInputConnections()
+	local camera = Workspace.CurrentCamera
+	if camera and originalCameraType then
+		camera.CameraType = originalCameraType
+		if originalCameraSubject then
+			camera.CameraSubject = originalCameraSubject
+		end
+	end
+	originalCameraType = nil
+	originalCameraSubject = nil
+end
+
+-- =================================================================
+-- UI building primitives.
+-- =================================================================
+
+-- A vertical-list section with a title bar and a content area.
+local function CreateSection(parent, sectionId, titleText)
 	local section = Instance.new("Frame")
-	section.Name = title .. "Section"
-	section.Size = UDim2.new(0, 460, 0, 200)
-	section.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+	section.Name = sectionId
+	section.Size = UDim2.new(1, -20, 0, 0)
+	section.AutomaticSize = Enum.AutomaticSize.Y
+	section.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+	section.BackgroundTransparency = 0.15
 	section.BorderSizePixel = 0
 	section.Parent = parent
-	
-	local sectionCorner = Instance.new("UICorner")
-	sectionCorner.CornerRadius = UDim.new(0, 8)
-	sectionCorner.Parent = section
-	
-	-- Section title
-	local sectionTitle = Instance.new("TextLabel")
-	sectionTitle.Name = "Title"
-	sectionTitle.Size = UDim2.new(1, 0, 0, 40)
-	sectionTitle.BackgroundTransparency = 1
-	sectionTitle.Text = title
-	sectionTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-	sectionTitle.TextSize = 20
-	sectionTitle.Font = Enum.Font.GothamBold
-	sectionTitle.Parent = section
-	
-	-- Options container
-	local optionsContainer = Instance.new("Frame")
-	optionsContainer.Name = "OptionsContainer"
-	optionsContainer.Size = UDim2.new(1, -20, 1, -50)
-	optionsContainer.Position = UDim2.new(0, 10, 0, 45)
-	optionsContainer.BackgroundTransparency = 1
-	optionsContainer.Parent = section
-	
-	local layout = Instance.new("UIGridLayout")
-	layout.CellSize = UDim2.new(0, 140, 0, 40)
-	layout.CellPadding = UDim2.new(0, 5, 0, 5)
-	layout.Parent = optionsContainer
-	
-	-- Create options
-	if createOptions then
-		createOptions(optionsContainer)
-	end
-	
-	-- Auto-resize section based on content
-	layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-		section.Size = UDim2.new(0, 460, 0, layout.AbsoluteContentSize.Y + 60)
-	end)
-	
-	return section
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = section
+
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Vertical
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 6)
+	layout.Parent = section
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingTop = UDim.new(0, 8)
+	padding.PaddingBottom = UDim.new(0, 10)
+	padding.PaddingLeft = UDim.new(0, 10)
+	padding.PaddingRight = UDim.new(0, 10)
+	padding.Parent = section
+
+	local title = Instance.new("TextLabel")
+	title.Name = "Title"
+	title.Size = UDim2.new(1, 0, 0, 24)
+	title.BackgroundTransparency = 1
+	title.Text = titleText
+	title.TextColor3 = Color3.fromRGB(245, 215, 110)
+	title.TextSize = 16
+	title.Font = Enum.Font.GothamBold
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.LayoutOrder = 0
+	title.Parent = section
+
+	local content = Instance.new("Frame")
+	content.Name = "Content"
+	content.Size = UDim2.new(1, 0, 0, 0)
+	content.AutomaticSize = Enum.AutomaticSize.Y
+	content.BackgroundTransparency = 1
+	content.LayoutOrder = 1
+	content.Parent = section
+
+	return section, content
 end
 
--- Create an option button
-function CharacterEditorUI.CreateOptionButton(id, text)
+-- A grid of mini items. Each item is a square button with an optional
+-- ViewportFrame thumbnail above its label.
+local function MakeGridContainer(parent, cellSize)
+	parent.Size = UDim2.new(1, 0, 0, 0)
+	parent.AutomaticSize = Enum.AutomaticSize.Y
+
+	local grid = Instance.new("UIGridLayout")
+	grid.CellSize = cellSize
+	grid.CellPadding = UDim2.new(0, 6, 0, 6)
+	grid.SortOrder = Enum.SortOrder.LayoutOrder
+	grid.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	grid.Parent = parent
+
+	return grid
+end
+
+-- A single text-only option button (used for races).
+local function CreateTextOptionButton(id, text)
 	local button = Instance.new("TextButton")
 	button.Name = id
-	button.BackgroundColor3 = Color3.fromRGB(70, 70, 80)
+	button.AutoButtonColor = false
+	button.BackgroundColor3 = Color3.fromRGB(60, 60, 75)
 	button.Text = text
 	button.TextColor3 = Color3.fromRGB(255, 255, 255)
-	button.TextSize = 16
-	button.Font = Enum.Font.Gotham
-	button.AutoButtonColor = false
-	
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 6)
-	corner.Parent = button
-	
-	return button
-end
-
--- Create a color swatch button. The button background shows the swatch
--- color directly and a translucent label strip displays its name. The
--- selection state is shown via a colored UIStroke.
-function CharacterEditorUI.CreateColorButton(id, text, color)
-	local button = Instance.new("TextButton")
-	button.Name = id
-	button.BackgroundColor3 = color
-	button.Text = ""
-	button.AutoButtonColor = false
+	button.TextSize = 14
+	button.Font = Enum.Font.GothamBold
 
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, 6)
 	corner.Parent = button
 
 	local stroke = Instance.new("UIStroke")
-	stroke.Name = "Stroke"
 	stroke.Color = Color3.fromRGB(70, 70, 80)
 	stroke.Thickness = 2
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	stroke.Parent = button
 
+	return button
+end
+
+-- A mini-preview button: a 3D thumbnail of an R6 dummy wearing only this
+-- particular item, rendered into a tiny ViewportFrame, with a label
+-- underneath.
+local function CreateMiniPreviewButton(id, displayName, kind, asset)
+	local button = Instance.new("TextButton")
+	button.Name = id
+	button.AutoButtonColor = false
+	button.BackgroundColor3 = Color3.fromRGB(50, 50, 65)
+	button.Text = ""
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 6)
+	corner.Parent = button
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(70, 70, 80)
+	stroke.Thickness = 2
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = button
+
+	local viewport = Instance.new("ViewportFrame")
+	viewport.Name = "Thumbnail"
+	viewport.Size = UDim2.new(1, -8, 1, -22)
+	viewport.Position = UDim2.new(0, 4, 0, 4)
+	viewport.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+	viewport.BorderSizePixel = 0
+	viewport.LightDirection = Vector3.new(-0.5, -1, -0.5)
+	viewport.Ambient = Color3.fromRGB(160, 160, 160)
+	viewport.LightColor = Color3.fromRGB(255, 255, 255)
+	viewport.Parent = button
+
+	local viewportCorner = Instance.new("UICorner")
+	viewportCorner.CornerRadius = UDim.new(0, 4)
+	viewportCorner.Parent = viewport
+
+	local worldModel = Instance.new("WorldModel")
+	worldModel.Parent = viewport
+
+	local camera = Instance.new("Camera")
+	camera.Parent = viewport
+	viewport.CurrentCamera = camera
+
 	local label = Instance.new("TextLabel")
 	label.Name = "Label"
 	label.AnchorPoint = Vector2.new(0.5, 1)
 	label.Position = UDim2.new(0.5, 0, 1, -2)
-	label.Size = UDim2.new(1, -4, 0, 16)
-	label.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-	label.BackgroundTransparency = 0.45
-	label.Text = text
-	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.TextSize = 12
+	label.Size = UDim2.new(1, -8, 0, 16)
+	label.BackgroundTransparency = 1
+	label.Text = displayName
+	label.TextColor3 = Color3.fromRGB(245, 245, 245)
+	label.TextSize = 11
 	label.Font = Enum.Font.Gotham
+	label.TextScaled = false
+	label.TextTruncate = Enum.TextTruncate.AtEnd
 	label.Parent = button
 
-	local labelCorner = Instance.new("UICorner")
-	labelCorner.CornerRadius = UDim.new(0, 4)
-	labelCorner.Parent = label
+	-- Build the dummy asynchronously so we don't block the UI thread.
+	task.spawn(function()
+		local description = BuildSingleAssetDescription(kind, asset)
+		local rig = BuildR6Rig(description)
+		if not rig then return end
+		AnchorAllParts(rig)
+		local primary = rig.PrimaryPart or rig:FindFirstChild("HumanoidRootPart")
+		if primary then
+			rig.PrimaryPart = primary
+			rig:PivotTo(CFrame.new(0, 0, 0))
+		end
+		rig.Parent = worldModel
+
+		-- Re-tint after late accessory load.
+		local function retint()
+			TintHair(rig, currentHairColor)
+		end
+		retint()
+		for _, t in ipairs({0.2, 0.6, 1.2, 2.4}) do
+			task.delay(t, function() if rig.Parent then retint() end end)
+		end
+		rig.DescendantAdded:Connect(function(descendant)
+			if descendant:IsA("Accessory") and IsHairAccessory(descendant) then
+				task.defer(retint)
+			end
+		end)
+
+		-- Frame the camera based on which body region we want to highlight.
+		if kind == "hair" then
+			camera.CFrame = CFrame.lookAt(Vector3.new(0, 2.5, 4), Vector3.new(0, 2.2, 0))
+		elseif kind == "shirt" then
+			camera.CFrame = CFrame.lookAt(Vector3.new(0, 0.5, 5), Vector3.new(0, 0.5, 0))
+		elseif kind == "pants" then
+			camera.CFrame = CFrame.lookAt(Vector3.new(0, -1.5, 5), Vector3.new(0, -1.5, 0))
+		else
+			camera.CFrame = CFrame.lookAt(Vector3.new(0, 0, 6), Vector3.new(0, 0, 0))
+		end
+	end)
 
 	return button
 end
 
--- Setup button handlers
-function CharacterEditorUI.SetupHandlers(screenGui, onBack, onConfirm)
-	local background = screenGui.Background
-	local optionsPanel = background.OptionsPanel
-	local viewport = background.PreviewPanel.Viewport
-	
-	-- Race buttons
-	for raceName, raceData in pairs(CharacterConfig.RACES) do
-		local button = optionsPanel:FindFirstChild(raceName, true)
-		if button then
-			button.MouseButton1Click:Connect(function()
-				currentRace = raceName
-				CharacterEditorUI.UpdateSelection(optionsPanel, "РАСА", raceName)
-				CharacterEditorUI.UpdatePreview(viewport)
-				print("Selected race:", raceName)
-			end)
-		end
-	end
-	
-	-- Hairstyle buttons
-	for i, hairstyle in ipairs(CharacterConfig.HAIRSTYLES) do
-		local button = optionsPanel:FindFirstChild("Hairstyle" .. i, true)
-		if button then
-			button.MouseButton1Click:Connect(function()
-				currentHairstyle = i
-				CharacterEditorUI.UpdateSelection(optionsPanel, "ПРИЧЕСКА", "Hairstyle" .. i)
-				CharacterEditorUI.UpdatePreview(viewport)
-				print("Selected hairstyle:", i)
-			end)
-		end
-	end
-	
-	-- Shirt buttons
-	for i, shirt in ipairs(CharacterConfig.CLOTHING.Shirts) do
-		local button = optionsPanel:FindFirstChild("Shirt" .. i, true)
-		if button then
-			button.MouseButton1Click:Connect(function()
-				currentShirt = i
-				CharacterEditorUI.UpdateSelection(optionsPanel, "РУБАШКА", "Shirt" .. i)
-				CharacterEditorUI.UpdatePreview(viewport)
-				print("Selected shirt:", i)
-			end)
-		end
-	end
-	
-	-- Pants buttons
-	for i, pants in ipairs(CharacterConfig.CLOTHING.Pants) do
-		local button = optionsPanel:FindFirstChild("Pants" .. i, true)
-		if button then
-			button.MouseButton1Click:Connect(function()
-				currentPants = i
-				CharacterEditorUI.UpdateSelection(optionsPanel, "ШТАНЫ", "Pants" .. i)
-				CharacterEditorUI.UpdatePreview(viewport)
-				print("Selected pants:", i)
-			end)
-		end
-	end
-
-	-- Skin color buttons
-	for i in ipairs(CharacterConfig.SKIN_COLORS) do
-		local button = optionsPanel:FindFirstChild("Skin" .. i, true)
-		if button then
-			button.MouseButton1Click:Connect(function()
-				currentSkinColorIndex = i
-				CharacterEditorUI.UpdateSelection(optionsPanel, "ЦВЕТ КОЖИ", "Skin" .. i)
-				CharacterEditorUI.UpdatePreview(viewport)
-			end)
-		end
-	end
-
-	-- Hair color buttons
-	for i in ipairs(CharacterConfig.HAIR_COLORS) do
-		local button = optionsPanel:FindFirstChild("Hair" .. i, true)
-		if button then
-			button.MouseButton1Click:Connect(function()
-				currentHairColorIndex = i
-				CharacterEditorUI.UpdateSelection(optionsPanel, "ЦВЕТ ВОЛОС", "Hair" .. i)
-				CharacterEditorUI.UpdatePreview(viewport)
-			end)
-		end
-	end
-
-	-- Back button
-	local backButton = background.ButtonsContainer.BackButton
-	backButton.MouseButton1Click:Connect(function()
-		if onBack then
-			onBack()
-		end
-	end)
-	
-	-- Confirm button
-	local confirmButton = background.ButtonsContainer.ConfirmButton
-	confirmButton.MouseButton1Click:Connect(function()
-		local skinSwatch = CharacterConfig.SKIN_COLORS[currentSkinColorIndex]
-		local hairSwatch = CharacterConfig.HAIR_COLORS[currentHairColorIndex]
-		local characterData = {
-			Race = currentRace,
-			HairstyleIndex = currentHairstyle,
-			ShirtIndex = currentShirt,
-			PantsIndex = currentPants,
-			SkinColorIndex = currentSkinColorIndex,
-			HairColorIndex = currentHairColorIndex,
-			SkinColor = (skinSwatch and skinSwatch.Color) or CharacterConfig.DEFAULT_CHARACTER.SkinColor,
-			HairColor = (hairSwatch and hairSwatch.Color) or CharacterConfig.DEFAULT_CHARACTER.HairColor,
-		}
-
-		if onConfirm then
-			onConfirm(characterData)
-		end
-	end)
+-- =================================================================
+-- RGB color picker (3 sliders + HEX input).
+-- =================================================================
+local function ToHex(color)
+	local r = math.clamp(math.floor(color.R * 255 + 0.5), 0, 255)
+	local g = math.clamp(math.floor(color.G * 255 + 0.5), 0, 255)
+	local b = math.clamp(math.floor(color.B * 255 + 0.5), 0, 255)
+	return string.format("%02X%02X%02X", r, g, b)
 end
 
--- Update the selection visual for a section. Color-swatch buttons keep
--- their swatch color and instead toggle a gold UIStroke to indicate the
--- active choice; regular text buttons swap their background color.
-function CharacterEditorUI.UpdateSelection(optionsPanel, sectionName, selectedId)
-	local section = optionsPanel:FindFirstChild(sectionName .. "Section")
-	if not section then return end
+local function FromHex(hex)
+	hex = hex:gsub("#", ""):gsub("%s", "")
+	if #hex ~= 6 then return nil end
+	local r = tonumber(hex:sub(1, 2), 16)
+	local g = tonumber(hex:sub(3, 4), 16)
+	local b = tonumber(hex:sub(5, 6), 16)
+	if not r or not g or not b then return nil end
+	return Color3.fromRGB(r, g, b)
+end
 
-	local container = section:FindFirstChild("OptionsContainer")
+local function CreateRGBColorPicker(id, initialColor, onChange)
+	local picker = Instance.new("Frame")
+	picker.Name = id
+	picker.Size = UDim2.new(1, 0, 0, 130)
+	picker.BackgroundTransparency = 1
+
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Vertical
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 4)
+	layout.Parent = picker
+
+	-- Top row: swatch preview + HEX input.
+	local topRow = Instance.new("Frame")
+	topRow.Name = "TopRow"
+	topRow.Size = UDim2.new(1, 0, 0, 32)
+	topRow.BackgroundTransparency = 1
+	topRow.LayoutOrder = 0
+	topRow.Parent = picker
+
+	local swatch = Instance.new("Frame")
+	swatch.Name = "Swatch"
+	swatch.Size = UDim2.new(0, 32, 0, 32)
+	swatch.Position = UDim2.new(0, 0, 0, 0)
+	swatch.BackgroundColor3 = initialColor
+	swatch.BorderSizePixel = 0
+	swatch.Parent = topRow
+
+	local swatchCorner = Instance.new("UICorner")
+	swatchCorner.CornerRadius = UDim.new(0, 4)
+	swatchCorner.Parent = swatch
+
+	local hexLabel = Instance.new("TextLabel")
+	hexLabel.Size = UDim2.new(0, 30, 1, 0)
+	hexLabel.Position = UDim2.new(0, 40, 0, 0)
+	hexLabel.BackgroundTransparency = 1
+	hexLabel.Text = "#"
+	hexLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+	hexLabel.TextSize = 14
+	hexLabel.Font = Enum.Font.GothamBold
+	hexLabel.TextXAlignment = Enum.TextXAlignment.Left
+	hexLabel.Parent = topRow
+
+	local hexBox = Instance.new("TextBox")
+	hexBox.Name = "HexBox"
+	hexBox.Size = UDim2.new(0, 80, 1, 0)
+	hexBox.Position = UDim2.new(0, 56, 0, 0)
+	hexBox.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+	hexBox.TextColor3 = Color3.fromRGB(245, 245, 245)
+	hexBox.TextSize = 14
+	hexBox.Font = Enum.Font.Code
+	hexBox.PlaceholderText = "FFFFFF"
+	hexBox.Text = ToHex(initialColor)
+	hexBox.ClearTextOnFocus = false
+	hexBox.Parent = topRow
+
+	local hexCorner = Instance.new("UICorner")
+	hexCorner.CornerRadius = UDim.new(0, 4)
+	hexCorner.Parent = hexBox
+
+	local hexStroke = Instance.new("UIStroke")
+	hexStroke.Color = Color3.fromRGB(60, 60, 80)
+	hexStroke.Thickness = 1
+	hexStroke.Parent = hexBox
+
+	local current = initialColor
+	local sliderRefs = {}
+
+	local function applyColor(newColor)
+		current = newColor
+		swatch.BackgroundColor3 = newColor
+		hexBox.Text = ToHex(newColor)
+		for _, ref in ipairs(sliderRefs) do
+			ref.refresh(newColor)
+		end
+		if onChange then
+			onChange(newColor)
+		end
+	end
+
+	-- Build a single horizontal RGB slider row.
+	local function CreateChannelSlider(channelName, channelGetter, layoutOrder)
+		local row = Instance.new("Frame")
+		row.Name = channelName .. "Slider"
+		row.Size = UDim2.new(1, 0, 0, 26)
+		row.BackgroundTransparency = 1
+		row.LayoutOrder = layoutOrder
+		row.Parent = picker
+
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.new(0, 18, 1, 0)
+		label.BackgroundTransparency = 1
+		label.Text = channelName
+		label.TextColor3 = Color3.fromRGB(220, 220, 220)
+		label.TextSize = 14
+		label.Font = Enum.Font.GothamBold
+		label.TextXAlignment = Enum.TextXAlignment.Left
+		label.Parent = row
+
+		local track = Instance.new("Frame")
+		track.Name = "Track"
+		track.Size = UDim2.new(1, -70, 0, 6)
+		track.Position = UDim2.new(0, 22, 0.5, -3)
+		track.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+		track.BorderSizePixel = 0
+		track.Parent = row
+
+		local trackCorner = Instance.new("UICorner")
+		trackCorner.CornerRadius = UDim.new(1, 0)
+		trackCorner.Parent = track
+
+		local fill = Instance.new("Frame")
+		fill.Name = "Fill"
+		fill.Size = UDim2.new(channelGetter(initialColor), 0, 1, 0)
+		fill.BackgroundColor3 = (channelName == "R" and Color3.fromRGB(220, 60, 60))
+			or (channelName == "G" and Color3.fromRGB(60, 200, 80))
+			or Color3.fromRGB(80, 120, 220)
+		fill.BorderSizePixel = 0
+		fill.Parent = track
+
+		local fillCorner = Instance.new("UICorner")
+		fillCorner.CornerRadius = UDim.new(1, 0)
+		fillCorner.Parent = fill
+
+		local thumb = Instance.new("Frame")
+		thumb.Name = "Thumb"
+		thumb.AnchorPoint = Vector2.new(0.5, 0.5)
+		thumb.Size = UDim2.new(0, 14, 0, 14)
+		thumb.Position = UDim2.new(channelGetter(initialColor), 0, 0.5, 0)
+		thumb.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+		thumb.BorderSizePixel = 0
+		thumb.Parent = track
+
+		local thumbCorner = Instance.new("UICorner")
+		thumbCorner.CornerRadius = UDim.new(1, 0)
+		thumbCorner.Parent = thumb
+
+		local valueLabel = Instance.new("TextLabel")
+		valueLabel.Size = UDim2.new(0, 40, 1, 0)
+		valueLabel.Position = UDim2.new(1, -42, 0, 0)
+		valueLabel.BackgroundTransparency = 1
+		valueLabel.Text = tostring(math.floor(channelGetter(initialColor) * 255 + 0.5))
+		valueLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+		valueLabel.TextSize = 12
+		valueLabel.Font = Enum.Font.Code
+		valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+		valueLabel.Parent = row
+
+		local dragging = false
+		local function setFromMouseX(mouseX)
+			local trackPos = track.AbsolutePosition.X
+			local trackSize = track.AbsoluteSize.X
+			if trackSize <= 0 then return end
+			local t = math.clamp((mouseX - trackPos) / trackSize, 0, 1)
+			local r, g, b = current.R, current.G, current.B
+			if channelName == "R" then r = t
+			elseif channelName == "G" then g = t
+			else b = t
+			end
+			applyColor(Color3.new(r, g, b))
+		end
+
+		track.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch then
+				dragging = true
+				setFromMouseX(input.Position.X)
+			end
+		end)
+		thumb.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch then
+				dragging = true
+			end
+		end)
+		UserInputService.InputEnded:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch then
+				dragging = false
+			end
+		end)
+		UserInputService.InputChanged:Connect(function(input)
+			if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+				or input.UserInputType == Enum.UserInputType.Touch) then
+				setFromMouseX(input.Position.X)
+			end
+		end)
+
+		table.insert(sliderRefs, {
+			refresh = function(newColor)
+				local v = channelGetter(newColor)
+				fill.Size = UDim2.new(v, 0, 1, 0)
+				thumb.Position = UDim2.new(v, 0, 0.5, 0)
+				valueLabel.Text = tostring(math.floor(v * 255 + 0.5))
+			end,
+		})
+	end
+
+	CreateChannelSlider("R", function(c) return c.R end, 1)
+	CreateChannelSlider("G", function(c) return c.G end, 2)
+	CreateChannelSlider("B", function(c) return c.B end, 3)
+
+	hexBox.FocusLost:Connect(function()
+		local parsed = FromHex(hexBox.Text)
+		if parsed then
+			applyColor(parsed)
+		else
+			hexBox.Text = ToHex(current)
+		end
+	end)
+
+	-- External setter so callers can sync the picker programmatically.
+	picker:SetAttribute("CurrentHex", ToHex(initialColor))
+	function picker.SetColor(_, color)
+		applyColor(color)
+		picker:SetAttribute("CurrentHex", ToHex(color))
+	end
+
+	return picker
+end
+
+-- =================================================================
+-- Main UI.
+-- =================================================================
+function CharacterEditorUI.CreateUI()
+	-- Place the world preview character first so the camera has something
+	-- to lock onto when the UI fades in.
+	CharacterEditorUI.UpdatePreview()
+	SetupOrbitCamera()
+
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "CharacterEditorUI"
+	screenGui.ResetOnSpawn = false
+	screenGui.IgnoreGuiInset = true
+	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+	-- Side gradient acts as a vignette so the right options panel reads
+	-- well over the world without entirely covering it.
+	local sideShade = Instance.new("Frame")
+	sideShade.Name = "SideShade"
+	sideShade.AnchorPoint = Vector2.new(1, 0)
+	sideShade.Position = UDim2.new(1, 0, 0, 0)
+	sideShade.Size = UDim2.new(0, 460, 1, 0)
+	sideShade.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+	sideShade.BackgroundTransparency = 0.25
+	sideShade.BorderSizePixel = 0
+	sideShade.Parent = screenGui
+
+	-- Title banner along the top.
+	local title = Instance.new("TextLabel")
+	title.Name = "Title"
+	title.AnchorPoint = Vector2.new(0.5, 0)
+	title.Position = UDim2.new(0.3, 0, 0.04, 0)
+	title.Size = UDim2.new(0, 600, 0, 60)
+	title.BackgroundTransparency = 1
+	title.Text = "СОЗДАНИЕ ПЕРСОНАЖА"
+	title.TextColor3 = Color3.fromRGB(255, 255, 255)
+	title.TextSize = 32
+	title.Font = Enum.Font.GothamBold
+	title.TextStrokeTransparency = 0.3
+	title.Parent = screenGui
+
+	-- Right options panel — the main UI.
+	local optionsPanel = Instance.new("ScrollingFrame")
+	optionsPanel.Name = "OptionsPanel"
+	optionsPanel.AnchorPoint = Vector2.new(1, 0.5)
+	optionsPanel.Position = UDim2.new(1, -10, 0.5, 0)
+	optionsPanel.Size = UDim2.new(0, 440, 0.85, 0)
+	optionsPanel.BackgroundTransparency = 1
+	optionsPanel.BorderSizePixel = 0
+	optionsPanel.ScrollBarThickness = 6
+	optionsPanel.CanvasSize = UDim2.new(0, 0, 0, 0)
+	optionsPanel.AutomaticCanvasSize = Enum.AutomaticCanvasSize.Y
+	optionsPanel.Parent = screenGui
+	optionsPanelRef = optionsPanel
+
+	local panelLayout = Instance.new("UIListLayout")
+	panelLayout.FillDirection = Enum.FillDirection.Vertical
+	panelLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	panelLayout.Padding = UDim.new(0, 12)
+	panelLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	panelLayout.Parent = optionsPanel
+
+	local panelPadding = Instance.new("UIPadding")
+	panelPadding.PaddingTop = UDim.new(0, 10)
+	panelPadding.PaddingBottom = UDim.new(0, 80) -- leave room for buttons
+	panelPadding.Parent = optionsPanel
+
+	-- Race section (text buttons, races are few).
+	local raceSection, raceContent = CreateSection(optionsPanel, "RaceSection", "РАСА")
+	raceSection.LayoutOrder = 1
+	MakeGridContainer(raceContent, UDim2.new(0, 130, 0, 36))
+	for raceName, raceData in pairs(CharacterConfig.RACES) do
+		local btn = CreateTextOptionButton(raceName, raceData.Name)
+		btn.Parent = raceContent
+	end
+
+	-- Hairstyle section (mini previews).
+	local hairSection, hairContent = CreateSection(optionsPanel, "HairstyleSection", "ПРИЧЕСКА")
+	hairSection.LayoutOrder = 2
+	MakeGridContainer(hairContent, UDim2.new(0, 92, 0, 110))
+	for i, hairstyle in ipairs(CharacterConfig.HAIRSTYLES) do
+		local btn = CreateMiniPreviewButton("Hairstyle" .. i, hairstyle.Name, "hair", hairstyle)
+		btn.LayoutOrder = i
+		btn.Parent = hairContent
+	end
+
+	-- Shirt section.
+	local shirtSection, shirtContent = CreateSection(optionsPanel, "ShirtSection", "РУБАШКА")
+	shirtSection.LayoutOrder = 3
+	MakeGridContainer(shirtContent, UDim2.new(0, 92, 0, 110))
+	for i, shirt in ipairs(CharacterConfig.CLOTHING.Shirts) do
+		local btn = CreateMiniPreviewButton("Shirt" .. i, shirt.Name, "shirt", shirt)
+		btn.LayoutOrder = i
+		btn.Parent = shirtContent
+	end
+
+	-- Pants section.
+	local pantsSection, pantsContent = CreateSection(optionsPanel, "PantsSection", "ШТАНЫ")
+	pantsSection.LayoutOrder = 4
+	MakeGridContainer(pantsContent, UDim2.new(0, 92, 0, 110))
+	for i, pants in ipairs(CharacterConfig.CLOTHING.Pants) do
+		local btn = CreateMiniPreviewButton("Pants" .. i, pants.Name, "pants", pants)
+		btn.LayoutOrder = i
+		btn.Parent = pantsContent
+	end
+
+	-- Skin colour picker.
+	local skinSection, skinContent = CreateSection(optionsPanel, "SkinColorSection", "ЦВЕТ КОЖИ")
+	skinSection.LayoutOrder = 5
+	skinPickerRef = CreateRGBColorPicker("SkinPicker", currentSkinColor, function(color)
+		currentSkinColor = color
+		if worldCharacter then
+			SetSkinColor(worldCharacter, color)
+		end
+	end)
+	skinPickerRef.Parent = skinContent
+
+	-- Hair colour picker.
+	local hairColorSection, hairColorContent = CreateSection(optionsPanel, "HairColorSection", "ЦВЕТ ВОЛОС")
+	hairColorSection.LayoutOrder = 6
+	hairPickerRef = CreateRGBColorPicker("HairPicker", currentHairColor, function(color)
+		currentHairColor = color
+		if worldCharacter then
+			TintHair(worldCharacter, color)
+		end
+	end)
+	hairPickerRef.Parent = hairColorContent
+
+	-- Bottom action buttons (overlay on the options panel).
+	local buttonsContainer = Instance.new("Frame")
+	buttonsContainer.Name = "ButtonsContainer"
+	buttonsContainer.AnchorPoint = Vector2.new(1, 1)
+	buttonsContainer.Position = UDim2.new(1, -10, 1, -10)
+	buttonsContainer.Size = UDim2.new(0, 440, 0, 50)
+	buttonsContainer.BackgroundTransparency = 1
+	buttonsContainer.Parent = screenGui
+
+	local backButton = Instance.new("TextButton")
+	backButton.Name = "BackButton"
+	backButton.Size = UDim2.new(0.45, -5, 1, 0)
+	backButton.Position = UDim2.new(0, 0, 0, 0)
+	backButton.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+	backButton.Text = "НАЗАД"
+	backButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	backButton.TextSize = 18
+	backButton.Font = Enum.Font.GothamBold
+	backButton.AutoButtonColor = false
+	backButton.Parent = buttonsContainer
+
+	local backCorner = Instance.new("UICorner")
+	backCorner.CornerRadius = UDim.new(0, 8)
+	backCorner.Parent = backButton
+
+	local confirmButton = Instance.new("TextButton")
+	confirmButton.Name = "ConfirmButton"
+	confirmButton.Size = UDim2.new(0.55, -5, 1, 0)
+	confirmButton.Position = UDim2.new(0.45, 5, 0, 0)
+	confirmButton.BackgroundColor3 = Color3.fromRGB(60, 150, 60)
+	confirmButton.Text = "ПОДТВЕРДИТЬ"
+	confirmButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	confirmButton.TextSize = 18
+	confirmButton.Font = Enum.Font.GothamBold
+	confirmButton.AutoButtonColor = false
+	confirmButton.Parent = buttonsContainer
+
+	local confirmCorner = Instance.new("UICorner")
+	confirmCorner.CornerRadius = UDim.new(0, 8)
+	confirmCorner.Parent = confirmButton
+
+	screenGui.Parent = playerGui
+	activeScreenGui = screenGui
+	return screenGui
+end
+
+-- =================================================================
+-- Selection state visuals: highlight active text-/mini-preview button
+-- with a gold UIStroke.
+-- =================================================================
+local function SetGroupSelection(container, selectedId)
 	if not container then return end
-
-	for _, button in ipairs(container:GetChildren()) do
-		if button:IsA("TextButton") then
-			local stroke = button:FindFirstChildOfClass("UIStroke")
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("TextButton") then
+			local stroke = child:FindFirstChildOfClass("UIStroke")
 			if stroke then
 				stroke.Color = Color3.fromRGB(70, 70, 80)
 				stroke.Thickness = 2
-			else
-				button.BackgroundColor3 = Color3.fromRGB(70, 70, 80)
 			end
 		end
 	end
-
-	local selectedButton = container:FindFirstChild(selectedId)
-	if selectedButton then
-		local stroke = selectedButton:FindFirstChildOfClass("UIStroke")
+	local selected = container:FindFirstChild(selectedId)
+	if selected then
+		local stroke = selected:FindFirstChildOfClass("UIStroke")
 		if stroke then
 			stroke.Color = Color3.fromRGB(255, 215, 0)
 			stroke.Thickness = 4
-		else
-			selectedButton.BackgroundColor3 = Color3.fromRGB(100, 150, 100)
 		end
 	end
 end
 
--- Initialize with default selections
-function CharacterEditorUI.InitializeDefaults(screenGui)
-	local optionsPanel = screenGui.Background.OptionsPanel
-	CharacterEditorUI.UpdateSelection(optionsPanel, "РАСА", "Human")
-	CharacterEditorUI.UpdateSelection(optionsPanel, "ПРИЧЕСКА", "Hairstyle1")
-	CharacterEditorUI.UpdateSelection(optionsPanel, "РУБАШКА", "Shirt1")
-	CharacterEditorUI.UpdateSelection(optionsPanel, "ШТАНЫ", "Pants1")
-	CharacterEditorUI.UpdateSelection(optionsPanel, "ЦВЕТ КОЖИ", "Skin" .. currentSkinColorIndex)
-	CharacterEditorUI.UpdateSelection(optionsPanel, "ЦВЕТ ВОЛОС", "Hair" .. currentHairColorIndex)
+function CharacterEditorUI.UpdateSelection(_, sectionId, selectedId)
+	if not optionsPanelRef then return end
+	local section = optionsPanelRef:FindFirstChild(sectionId)
+	if not section then return end
+	local content = section:FindFirstChild("Content")
+	SetGroupSelection(content, selectedId)
+end
+
+-- =================================================================
+-- Wire up button handlers.
+-- =================================================================
+function CharacterEditorUI.SetupHandlers(screenGui, onBack, onConfirm)
+	local optionsPanel = screenGui:FindFirstChild("OptionsPanel") or optionsPanelRef
+	if not optionsPanel then return end
+
+	-- Race buttons.
+	for raceName in pairs(CharacterConfig.RACES) do
+		local btn = optionsPanel:FindFirstChild(raceName, true)
+		if btn then
+			btn.MouseButton1Click:Connect(function()
+				currentRace = raceName
+				CharacterEditorUI.UpdateSelection(nil, "RaceSection", raceName)
+				CharacterEditorUI.UpdatePreview()
+			end)
+		end
+	end
+
+	-- Hairstyle buttons.
+	for i in ipairs(CharacterConfig.HAIRSTYLES) do
+		local id = "Hairstyle" .. i
+		local btn = optionsPanel:FindFirstChild(id, true)
+		if btn then
+			btn.MouseButton1Click:Connect(function()
+				currentHairstyle = i
+				CharacterEditorUI.UpdateSelection(nil, "HairstyleSection", id)
+				CharacterEditorUI.UpdatePreview()
+			end)
+		end
+	end
+
+	-- Shirt buttons.
+	for i in ipairs(CharacterConfig.CLOTHING.Shirts) do
+		local id = "Shirt" .. i
+		local btn = optionsPanel:FindFirstChild(id, true)
+		if btn then
+			btn.MouseButton1Click:Connect(function()
+				currentShirt = i
+				CharacterEditorUI.UpdateSelection(nil, "ShirtSection", id)
+				CharacterEditorUI.UpdatePreview()
+			end)
+		end
+	end
+
+	-- Pants buttons.
+	for i in ipairs(CharacterConfig.CLOTHING.Pants) do
+		local id = "Pants" .. i
+		local btn = optionsPanel:FindFirstChild(id, true)
+		if btn then
+			btn.MouseButton1Click:Connect(function()
+				currentPants = i
+				CharacterEditorUI.UpdateSelection(nil, "PantsSection", id)
+				CharacterEditorUI.UpdatePreview()
+			end)
+		end
+	end
+
+	-- Back button.
+	local buttons = screenGui:FindFirstChild("ButtonsContainer")
+	if buttons then
+		local backButton = buttons:FindFirstChild("BackButton")
+		if backButton then
+			backButton.MouseButton1Click:Connect(function()
+				RestoreCamera()
+				if worldCharacter then
+					worldCharacter:Destroy()
+					worldCharacter = nil
+				end
+				if onBack then onBack() end
+			end)
+		end
+
+		local confirmButton = buttons:FindFirstChild("ConfirmButton")
+		if confirmButton then
+			confirmButton.MouseButton1Click:Connect(function()
+				local characterData = {
+					Race = currentRace,
+					HairstyleIndex = currentHairstyle,
+					ShirtIndex = currentShirt,
+					PantsIndex = currentPants,
+					SkinColor = currentSkinColor,
+					HairColor = currentHairColor,
+				}
+
+				RestoreCamera()
+				if worldCharacter then
+					worldCharacter:Destroy()
+					worldCharacter = nil
+				end
+
+				if onConfirm then
+					onConfirm(characterData)
+				end
+			end)
+		end
+	end
+end
+
+-- =================================================================
+-- Initialize defaults — highlight the starting selection.
+-- =================================================================
+function CharacterEditorUI.InitializeDefaults(_)
+	CharacterEditorUI.UpdateSelection(nil, "RaceSection", currentRace)
+	CharacterEditorUI.UpdateSelection(nil, "HairstyleSection", "Hairstyle" .. currentHairstyle)
+	CharacterEditorUI.UpdateSelection(nil, "ShirtSection", "Shirt" .. currentShirt)
+	CharacterEditorUI.UpdateSelection(nil, "PantsSection", "Pants" .. currentPants)
 end
 
 return CharacterEditorUI

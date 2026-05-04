@@ -787,12 +787,11 @@ local function CreateRGBColorPicker(id, initialColor, onChange)
 		end
 	end)
 
-	-- External setter so callers can sync the picker programmatically.
+	-- Stash the current hex on the Frame as an attribute so external code
+	-- (or an inspector) can read it back. We don't try to attach a custom
+	-- :SetColor method here because Roblox Instance objects don't accept
+	-- arbitrary new members at runtime.
 	picker:SetAttribute("CurrentHex", ToHex(initialColor))
-	function picker.SetColor(_, color)
-		applyColor(color)
-		picker:SetAttribute("CurrentHex", ToHex(color))
-	end
 
 	return picker
 end
@@ -848,7 +847,9 @@ function CharacterEditorUI.CreateUI()
 	optionsPanel.BorderSizePixel = 0
 	optionsPanel.ScrollBarThickness = 6
 	optionsPanel.CanvasSize = UDim2.new(0, 0, 0, 0)
-	optionsPanel.AutomaticCanvasSize = Enum.AutomaticCanvasSize.Y
+	-- ScrollingFrame.AutomaticCanvasSize takes Enum.AutomaticSize (NOT a
+	-- separate Enum.AutomaticCanvasSize — that one doesn't exist).
+	optionsPanel.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	optionsPanel.Parent = screenGui
 	optionsPanelRef = optionsPanel
 

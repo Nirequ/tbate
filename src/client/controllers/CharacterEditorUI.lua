@@ -216,15 +216,44 @@ local function BuildSingleAssetDescription(kind, asset)
 	return description
 end
 
--- Resolve the world anchor where the preview character should stand.
-local function GetPreviewAnchorCFrame()
-	local anchor = Workspace:FindFirstChild("PreviewSpot")
-	if anchor and anchor:IsA("BasePart") then
-		return anchor.CFrame + Vector3.new(0, 3, 0)
+-- Pick the world anchor where the preview character should stand.
+-- We want the rig's *feet* to sit exactly on top of the anchor's top
+-- face, so we offset the HumanoidRootPart by spawn.Size.Y/2 (half the
+-- thickness of the spawn pad) plus the leg height (~3 studs for an R6
+-- rig: HRP is at the center of the torso and feet are 3 studs below).
+local function ResolvePreviewAnchorPart()
+	-- A user-named PreviewSpot wins over everything — search recursively
+	-- so it's fine to nest it inside a Folder/Model.
+	local explicit = Workspace:FindFirstChild("PreviewSpot", true)
+	if explicit and explicit:IsA("BasePart") then
+		return explicit
 	end
-	local spawn = Workspace:FindFirstChildOfClass("SpawnLocation")
-	if spawn then
-		return spawn.CFrame + Vector3.new(0, 3, 0)
+	-- Otherwise pick the first SpawnLocation we can find anywhere in the
+	-- world (Workspace:FindFirstChildOfClass is non-recursive, which is
+	-- why a SpawnLocation parented inside a Folder was being missed).
+	for _, descendant in ipairs(Workspace:GetDescendants()) do
+		if descendant:IsA("SpawnLocation") then
+			return descendant
+		end
+	end
+	return nil
+end
+
+local previewAnchorWarned = false
+local function GetPreviewAnchorCFrame()
+	local anchor = ResolvePreviewAnchorPart()
+	if anchor then
+		local topY = anchor.Position.Y + anchor.Size.Y * 0.5
+		-- HRP sits 3 studs above the surface so the feet land on it.
+		return CFrame.new(anchor.Position.X, topY + 3, anchor.Position.Z)
+			* (anchor.CFrame - anchor.Position)
+	end
+	if not previewAnchorWarned then
+		warn("[CharacterEditorUI] No SpawnLocation or PreviewSpot Part "
+			.. "found in Workspace — falling back to (0, 5, 0). "
+			.. "Add a Part named PreviewSpot where you want the preview "
+			.. "character to stand.")
+		previewAnchorWarned = true
 	end
 	return CFrame.new(0, 5, 0)
 end

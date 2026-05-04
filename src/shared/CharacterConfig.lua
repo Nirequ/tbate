@@ -31,7 +31,7 @@ CharacterConfig.RACES = {
 		HeadScale = 1.0,
 		BodyTypeScale = 0.95,
 		HasEars = true,
-		EarAssetId = nil  -- TODO: Add elf ear accessory asset ID
+		EarAssetId = 242662351524411  -- TODO: Add elf ear accessory asset ID
 	},
 	Dwarf = {
 		Name = "Дварф",
@@ -47,9 +47,9 @@ CharacterConfig.RACES = {
 
 -- Available hairstyles (catalog asset IDs)
 CharacterConfig.HAIRSTYLES = {
-	{Name = "Короткие волосы", AssetId = 4819720316},  -- Roblox Boy Hair
-	{Name = "Длинные волосы", AssetId = 62234425},    -- Beautiful Hair
-	{Name = "Косички", AssetId = 11377306},           -- Pigtails
+	{Name = "Короткие волосы", AssetId = 97714842615043},  -- Roblox Boy Hair
+	{Name = "Длинные волосы", AssetId = 93559114730036},    -- Beautiful Hair
+	{Name = "Женские длинные", AssetId = 140687194936636},           -- Pigtails
 	{Name = "Лысый", AssetId = 0}
 }
 

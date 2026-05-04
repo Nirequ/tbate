@@ -29,9 +29,32 @@ local HAIR_ACCESSORY_TYPES = {
 	[Enum.AccessoryType.Hair] = true,
 }
 
--- Build a clean, blocky R6 humanoid rig from an empty HumanoidDescription
--- so the preview is always the classic block-limb avatar regardless of the
--- viewer's own avatar settings. A manually-placed PreviewDummy in
+-- R6 body part names that should be tinted by skin color.
+local R6_BODY_PARTS = {
+	Head = true,
+	Torso = true,
+	["Left Arm"] = true,
+	["Right Arm"] = true,
+	["Left Leg"] = true,
+	["Right Leg"] = true,
+}
+
+-- Directly set BasePart.Color on every R6 body part. We can't rely on
+-- Humanoid:ApplyDescription inside a ViewportFrame (the humanoid isn't
+-- parented to workspace, so the description colors don't always propagate
+-- to the rendered parts) — manual coloring is rock-solid in any context.
+local function SetSkinColor(character, color)
+	if not character or not color then return end
+	for _, child in ipairs(character:GetChildren()) do
+		if child:IsA("BasePart") and R6_BODY_PARTS[child.Name] then
+			child.Color = color
+		end
+	end
+end
+
+-- Build a clean, blocky R6 humanoid rig from a HumanoidDescription
+-- pre-populated with the default skin color so the rig is never rendered
+-- pitch-black on first paint. A manually-placed PreviewDummy in
 -- ReplicatedStorage.Shared still wins if present.
 local function GetPreviewTemplate()
 	if previewTemplate and previewTemplate.Parent == nil then
@@ -45,6 +68,18 @@ local function GetPreviewTemplate()
 	end
 
 	local description = Instance.new("HumanoidDescription")
+	-- Pre-populate the description with sane skin/hair colors so the rig
+	-- is built coloured rather than fully black (default Color3 is 0,0,0).
+	local defaultSkin = (CharacterConfig.SKIN_COLORS[1] and CharacterConfig.SKIN_COLORS[1].Color)
+		or CharacterConfig.DEFAULT_CHARACTER.SkinColor
+		or Color3.fromRGB(255, 220, 192)
+	description.HeadColor = defaultSkin
+	description.TorsoColor = defaultSkin
+	description.LeftArmColor = defaultSkin
+	description.RightArmColor = defaultSkin
+	description.LeftLegColor = defaultSkin
+	description.RightLegColor = defaultSkin
+
 	local ok, rig = pcall(function()
 		return Players:CreateHumanoidModelFromDescription(description, Enum.HumanoidRigType.R6)
 	end)
@@ -53,6 +88,10 @@ local function GetPreviewTemplate()
 		if humanoid then
 			humanoid.RigType = Enum.HumanoidRigType.R6
 		end
+		-- Belt-and-suspenders: explicitly colour body parts in case the
+		-- description colors didn't bake in (some Roblox versions do not
+		-- copy description colors into BasePart.Color on creation).
+		SetSkinColor(rig, defaultSkin)
 		previewTemplate = rig
 		return previewTemplate
 	end
@@ -62,13 +101,29 @@ local function GetPreviewTemplate()
 end
 
 -- Tint every hair-style accessory currently parented to the model.
+-- We check both AccessoryType (modern API) and the accessory Name as a
+-- fallback, because some legacy hair items have AccessoryType=Unknown.
+local function IsHairAccessory(accessory)
+	if HAIR_ACCESSORY_TYPES[accessory.AccessoryType] then
+		return true
+	end
+	local name = accessory.Name:lower()
+	return name:find("hair") ~= nil
+end
+
 local function TintHair(model, color)
 	if not model or not color then return end
 	for _, descendant in ipairs(model:GetDescendants()) do
-		if descendant:IsA("Accessory") and HAIR_ACCESSORY_TYPES[descendant.AccessoryType] then
+		if descendant:IsA("Accessory") and IsHairAccessory(descendant) then
 			for _, part in ipairs(descendant:GetDescendants()) do
 				if part:IsA("BasePart") or part:IsA("MeshPart") then
 					part.Color = color
+					-- A few catalog hair MeshParts also use TextureID with
+					-- a baked color — neutralising VertexColor helps the
+					-- new Color shine through.
+					if part:IsA("MeshPart") then
+						pcall(function() part.TextureID = part.TextureID end)
+					end
 				end
 			end
 		end
@@ -215,7 +270,8 @@ function CharacterEditorUI.UpdatePreview(previewPanel)
 			description.Pants = pants.AssetId
 		end
 
-		-- 4. Skin color (all body parts)
+		-- 4. Skin color (also written into description for non-preview
+		-- callers; the preview also paints parts directly below).
 		description.HeadColor = skinColor
 		description.TorsoColor = skinColor
 		description.LeftArmColor = skinColor
@@ -230,9 +286,28 @@ function CharacterEditorUI.UpdatePreview(previewPanel)
 		warn("CharacterEditorUI: failed to apply description:", err)
 	end
 
+	-- ApplyDescription does not always color body parts when the rig is
+	-- inside a ViewportFrame's WorldModel, so paint them directly.
+	SetSkinColor(character, skinColor)
+
 	-- Hair color is applied after ApplyDescription so it overrides the
-	-- accessory's stock color.
+	-- accessory's stock color. The accessory is added asynchronously by
+	-- ApplyDescription, so we tint it now AND again on a few frames later
+	-- to catch the late insertion. We also re-tint whenever a new
+	-- descendant of type Accessory appears.
 	TintHair(character, hairColor)
+	for _, delaySeconds in ipairs({0.1, 0.5, 1.5}) do
+		task.delay(delaySeconds, function()
+			if character.Parent then
+				TintHair(character, hairColor)
+			end
+		end)
+	end
+	character.DescendantAdded:Connect(function(descendant)
+		if descendant:IsA("Accessory") and IsHairAccessory(descendant) then
+			task.defer(TintHair, character, hairColor)
+		end
+	end)
 
 	-- Camera setup
 	local camera = previewPanel.CurrentCamera

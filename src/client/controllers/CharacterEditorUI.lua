@@ -789,7 +789,7 @@ local function CreateRGBColorPicker(id, initialColor, onChange)
 
 	-- External setter so callers can sync the picker programmatically.
 	picker:SetAttribute("CurrentHex", ToHex(initialColor))
-	function picker.SetColor(_, color)
+	picker.SetColor = function(color)
 		applyColor(color)
 		picker:SetAttribute("CurrentHex", ToHex(color))
 	end
@@ -847,8 +847,7 @@ function CharacterEditorUI.CreateUI()
 	optionsPanel.BackgroundTransparency = 1
 	optionsPanel.BorderSizePixel = 0
 	optionsPanel.ScrollBarThickness = 6
-	optionsPanel.CanvasSize = UDim2.new(0, 0, 0, 0)
-	optionsPanel.AutomaticCanvasSize = Enum.AutomaticCanvasSize.Y
+	optionsPanel.CanvasSize = UDim2.new(0, 0, 0, 2000) -- Fixed canvas size instead of automatic
 	optionsPanel.Parent = screenGui
 	optionsPanelRef = optionsPanel
 

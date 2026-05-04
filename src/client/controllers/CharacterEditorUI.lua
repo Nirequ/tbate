@@ -120,18 +120,36 @@ local function IsHairAccessory(accessory)
 	return name:find("hair") ~= nil
 end
 
+-- Recolor every renderable bit of an Accessory. Different catalog hair
+-- assets render through different mechanisms — some use BasePart.Color
+-- directly, some use SpecialMesh + VertexColor, some use MeshPart with
+-- a baked TextureID, some use SurfaceAppearance. To make slider changes
+-- actually visible we have to touch all of them.
+local function TintAccessoryParts(accessory, color)
+	for _, descendant in ipairs(accessory:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.Color = color
+		elseif descendant:IsA("SpecialMesh") then
+			-- VertexColor multiplies against the mesh texture. White (1,1,1)
+			-- shows the original texture; tint colors stain it.
+			descendant.VertexColor = Vector3.new(color.R, color.G, color.B)
+		elseif descendant:IsA("SurfaceAppearance") then
+			-- Catalog hair using PBR SurfaceAppearance fully overrides
+			-- BasePart.Color. There is no "tint" property; the only way to
+			-- let our color through is to remove the override texture.
+			pcall(function()
+				descendant.ColorMap = ""
+				descendant.AlphaMode = Enum.AlphaMode.Overlay
+			end)
+		end
+	end
+end
+
 local function TintHair(model, color)
 	if not model or not color then return end
 	for _, descendant in ipairs(model:GetDescendants()) do
 		if descendant:IsA("Accessory") and IsHairAccessory(descendant) then
-			for _, part in ipairs(descendant:GetDescendants()) do
-				if part:IsA("BasePart") or part:IsA("MeshPart") then
-					part.Color = color
-					if part:IsA("MeshPart") then
-						pcall(function() part.TextureID = part.TextureID end)
-					end
-				end
-			end
+			TintAccessoryParts(descendant, color)
 		end
 	end
 end
@@ -211,12 +229,27 @@ local function GetPreviewAnchorCFrame()
 	return CFrame.new(0, 5, 0)
 end
 
-local function AnchorAllParts(model)
+-- Lock the rig in place by anchoring ONLY the HumanoidRootPart. Body
+-- parts stay attached via Motor6Ds, accessories (e.g. hair) stay attached
+-- via Attachments — anchoring them too would freeze them at their initial
+-- position before the welds positioned them, which is why hair was
+-- floating off in space.
+local function AnchorRig(model)
+	if not model then return end
 	for _, descendant in ipairs(model:GetDescendants()) do
 		if descendant:IsA("BasePart") then
-			descendant.Anchored = true
 			descendant.CanCollide = false
 		end
+	end
+	local hrp = model:FindFirstChild("HumanoidRootPart")
+	if hrp then
+		hrp.Anchored = true
+	end
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		-- Stop the Humanoid from playing default animations / falling.
+		humanoid.PlatformStand = true
+		humanoid.AutoRotate = false
 	end
 end
 
@@ -235,7 +268,6 @@ function CharacterEditorUI.UpdatePreview()
 		return
 	end
 	character.Name = "TBATE_PreviewCharacter"
-	AnchorAllParts(character)
 
 	local primary = character.PrimaryPart or character:FindFirstChild("HumanoidRootPart")
 	if primary then
@@ -243,6 +275,7 @@ function CharacterEditorUI.UpdatePreview()
 		character:PivotTo(GetPreviewAnchorCFrame())
 	end
 	character.Parent = Workspace
+	AnchorRig(character)
 	worldCharacter = character
 
 	SetSkinColor(character, currentSkinColor)
@@ -251,13 +284,17 @@ function CharacterEditorUI.UpdatePreview()
 		task.delay(delaySeconds, function()
 			if character.Parent then
 				TintHair(character, currentHairColor)
-				AnchorAllParts(character)
+				-- Re-anchor only the HRP — accessories (hair) need to stay
+				-- non-anchored so their welds keep them attached to the head.
+				AnchorRig(character)
 			end
 		end)
 	end
 	character.DescendantAdded:Connect(function(descendant)
 		if descendant:IsA("BasePart") then
-			descendant.Anchored = true
+			-- Keep collision off for any new sub-part, but DO NOT anchor
+			-- — anchoring an accessory part before its weld places it
+			-- freezes it at world origin.
 			descendant.CanCollide = false
 		end
 		if descendant:IsA("Accessory") and IsHairAccessory(descendant) then
@@ -314,10 +351,39 @@ local function SetupOrbitCamera()
 		UpdateOrbitCamera()
 	end)
 
+	-- Don't start an orbit-camera drag if the click landed on top of any
+	-- of our UI panels (options panel, side shade, or the buttons inside).
+	-- gameProcessed isn't reliable for plain Frame/TextButton clicks, so
+	-- we do an explicit hit-test against the panel bounds.
+	local function IsClickOverUI(input)
+		if not optionsPanelRef or not optionsPanelRef.Parent then
+			return false
+		end
+		local pos = input.Position
+		local panelPos = optionsPanelRef.AbsolutePosition
+		local panelSize = optionsPanelRef.AbsoluteSize
+		if pos.X >= panelPos.X and pos.X <= panelPos.X + panelSize.X
+			and pos.Y >= panelPos.Y and pos.Y <= panelPos.Y + panelSize.Y then
+			return true
+		end
+		local screenGui = optionsPanelRef.Parent
+		local sideShade = screenGui:FindFirstChild("SideShade")
+		if sideShade then
+			local sp = sideShade.AbsolutePosition
+			local ss = sideShade.AbsoluteSize
+			if pos.X >= sp.X and pos.X <= sp.X + ss.X
+				and pos.Y >= sp.Y and pos.Y <= sp.Y + ss.Y then
+				return true
+			end
+		end
+		return false
+	end
+
 	table.insert(cameraInputConnections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		if gameProcessed then return end
 		if input.UserInputType == Enum.UserInputType.MouseButton2
 			or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if IsClickOverUI(input) then return end
 			cameraOrbitState.dragging = true
 			cameraOrbitState.lastMouseX = input.Position.X
 			cameraOrbitState.lastMouseY = input.Position.Y
@@ -338,6 +404,8 @@ local function SetupOrbitCamera()
 			cameraOrbitState.angle = cameraOrbitState.angle - dx * 0.01
 			cameraOrbitState.height = math.clamp(cameraOrbitState.height + dy * 0.05, -2, 8)
 		elseif input.UserInputType == Enum.UserInputType.MouseWheel and not gameProcessed then
+			-- Don't zoom if the wheel is over the UI panel either.
+			if IsClickOverUI(input) then return end
 			cameraOrbitState.distance = math.clamp(
 				cameraOrbitState.distance - input.Position.Z,
 				3, 20)
@@ -519,13 +587,14 @@ local function CreateMiniPreviewButton(id, displayName, kind, asset)
 		local description = BuildSingleAssetDescription(kind, asset)
 		local rig = BuildR6Rig(description)
 		if not rig then return end
-		AnchorAllParts(rig)
 		local primary = rig.PrimaryPart or rig:FindFirstChild("HumanoidRootPart")
 		if primary then
 			rig.PrimaryPart = primary
 			rig:PivotTo(CFrame.new(0, 0, 0))
 		end
 		rig.Parent = worldModel
+		-- Anchor in the WorldModel so physics doesn't make the rig drift.
+		AnchorRig(rig)
 
 		-- Re-tint after late accessory load.
 		local function retint()

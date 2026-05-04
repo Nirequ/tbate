@@ -35,7 +35,33 @@ local RACES = {
 	}
 }
 
--- Применить характеристики расы к персонажу
+-- Build a HumanoidDescription pre-populated with race scales / character
+-- colors. Used to spawn a fresh R6 character so the rig is always blocky.
+local function BuildDescription(characterData)
+	local description = Instance.new("HumanoidDescription")
+	if characterData then
+		local race = RACES[characterData.Race]
+		if race then
+			description.HeightScale = race.HeightScale
+			description.WidthScale = race.WidthScale
+			description.HeadScale = race.HeadScale
+			description.BodyTypeScale = race.BodyTypeScale
+		end
+		if characterData.SkinColor then
+			local c = characterData.SkinColor
+			description.HeadColor = c
+			description.TorsoColor = c
+			description.LeftArmColor = c
+			description.RightArmColor = c
+			description.LeftLegColor = c
+			description.RightLegColor = c
+		end
+	end
+	return description
+end
+
+-- Применить характеристики расы к персонажу (на случай если описание
+-- было применено не полностью — например, рёлоадим существующего).
 local function ApplyRaceModifications(character, race)
 	local raceData = RACES[race]
 	if not raceData then
@@ -101,6 +127,62 @@ local function ApplyAppearance(character, characterData)
 	print("Applied appearance to", character.Name)
 end
 
+-- Отключаем автоспавн, чтобы строить R6-риг вручную из HumanoidDescription
+Players.CharacterAutoLoads = false
+
+-- Найти место спавна (SpawnLocation в Workspace) или дать запасную точку.
+local function GetSpawnCFrame()
+	local spawn = workspace:FindFirstChildOfClass("SpawnLocation")
+	if spawn then
+		return spawn.CFrame + Vector3.new(0, 5, 0)
+	end
+	return CFrame.new(0, 10, 0)
+end
+
+-- Спавн R6-персонажа с применённой внешностью.
+local function SpawnCharacter(player, characterData)
+	-- Удалить предыдущего персонажа, если он остался
+	if player.Character then
+		player.Character:Destroy()
+	end
+
+	local description = BuildDescription(characterData)
+	local ok, character = pcall(function()
+		return Players:CreateHumanoidModelFromDescription(description, Enum.HumanoidRigType.R6)
+	end)
+	if not ok or not character then
+		warn("Failed to build R6 character for:", player.Name, character)
+		return nil
+	end
+
+	character.Name = player.Name
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.RigType = Enum.HumanoidRigType.R6
+		humanoid.DisplayName = player.DisplayName
+	end
+
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart then
+		rootPart.CFrame = GetSpawnCFrame()
+	end
+
+	character.Parent = workspace
+	player.Character = character
+
+	-- Авто-респавн при смерти
+	if humanoid then
+		humanoid.Died:Connect(function()
+			task.wait(Players.RespawnTime)
+			if player.Parent then
+				SpawnCharacter(player, characterData)
+			end
+		end)
+	end
+
+	return character
+end
+
 -- Загрузить персонажа игрока
 local function LoadPlayerCharacter(player)
 	print("Loading character for player:", player.Name)
@@ -112,45 +194,49 @@ local function LoadPlayerCharacter(player)
 	
 	if not success then
 		warn("Failed to load character data for:", player.Name)
-		return
 	end
 	
-	if not data or not data.Characters then
-		warn("No character data found for:", player.Name)
-		return
-	end
-	
-	-- Найти активного персонажа (последний созданный)
+	-- Найти активного персонажа (последний созданный) — может быть nil
 	local activeCharacter = nil
-	for i = 1, 3 do
-		if data.Characters[i] then
-			activeCharacter = data.Characters[i]
-			break
+	if data and data.Characters then
+		for i = 1, 3 do
+			if data.Characters[i] then
+				activeCharacter = data.Characters[i]
+				break
+			end
 		end
 	end
-	
+
 	if not activeCharacter then
-		warn("No active character found for:", player.Name)
+		warn("No active character found for:", player.Name, "- spawning default R6 character")
+	else
+		print("Found character data:", activeCharacter.Race)
+	end
+
+	-- Спавним R6-риг с уже применёнными scales и цветом кожи
+	local character = SpawnCharacter(player, activeCharacter)
+	if not character then
 		return
 	end
-	
-	print("Found character data:", activeCharacter.Race)
-	
-	-- Дождаться появления персонажа
-	local character = player.Character or player.CharacterAdded:Wait()
-	
-	-- Применить расу и внешность
-	ApplyRaceModifications(character, activeCharacter.Race)
-	ApplyAppearance(character, activeCharacter)
-	
+
+	-- Дополнительно применить аксессуары / цвет волос (то, что не входит
+	-- в HumanoidDescription напрямую).
+	if activeCharacter then
+		ApplyRaceModifications(character, activeCharacter.Race)
+		ApplyAppearance(character, activeCharacter)
+	end
+
 	-- Сохранить данные персонажа в player для доступа из других скриптов
+	local existing = player:FindFirstChild("CharacterData")
+	if existing then existing:Destroy() end
+
 	local characterDataValue = Instance.new("Folder")
 	characterDataValue.Name = "CharacterData"
 	characterDataValue.Parent = player
-	
+
 	local raceValue = Instance.new("StringValue")
 	raceValue.Name = "Race"
-	raceValue.Value = activeCharacter.Race
+	raceValue.Value = (activeCharacter and activeCharacter.Race) or "Human"
 	raceValue.Parent = characterDataValue
 	
 	print("Character loaded successfully for:", player.Name)
@@ -159,19 +245,11 @@ end
 -- Обработка входа игрока
 Players.PlayerAdded:Connect(function(player)
 	print("Player joined:", player.Name)
-	
-	-- Загрузить персонажа при первом спавне
-	player.CharacterAdded:Connect(function(character)
-		task.wait(0.5) -- Небольшая задержка для загрузки персонажа
-		LoadPlayerCharacter(player)
-	end)
-	
-	-- Если персонаж уже есть
-	if player.Character then
-		task.wait(0.5)
-		LoadPlayerCharacter(player)
-	end
+	LoadPlayerCharacter(player)
 end)
+for _, player in ipairs(Players:GetPlayers()) do
+	task.spawn(LoadPlayerCharacter, player)
+end
 
 print("=== TBATE RPG Main Game Server Ready ===")
 print("Waiting for players...")

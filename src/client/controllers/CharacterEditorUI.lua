@@ -29,9 +29,10 @@ local HAIR_ACCESSORY_TYPES = {
 	[Enum.AccessoryType.Hair] = true,
 }
 
--- Lazily build (or fetch) a humanoid rig used as a preview template.
--- Falls back to Players:CreateHumanoidModelFromUserId(1) so the editor
--- works without a manually-placed PreviewDummy in ReplicatedStorage.Shared.
+-- Build a clean, blocky R6 humanoid rig from an empty HumanoidDescription
+-- so the preview is always the classic block-limb avatar regardless of the
+-- viewer's own avatar settings. A manually-placed PreviewDummy in
+-- ReplicatedStorage.Shared still wins if present.
 local function GetPreviewTemplate()
 	if previewTemplate and previewTemplate.Parent == nil then
 		return previewTemplate
@@ -43,15 +44,20 @@ local function GetPreviewTemplate()
 		return previewTemplate
 	end
 
+	local description = Instance.new("HumanoidDescription")
 	local ok, rig = pcall(function()
-		return Players:CreateHumanoidModelFromUserId(1)
+		return Players:CreateHumanoidModelFromDescription(description, Enum.HumanoidRigType.R6)
 	end)
 	if ok and rig then
+		local humanoid = rig:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.RigType = Enum.HumanoidRigType.R6
+		end
 		previewTemplate = rig
 		return previewTemplate
 	end
 
-	warn("CharacterEditorUI: failed to build preview rig:", rig)
+	warn("CharacterEditorUI: failed to build R6 preview rig:", rig)
 	return nil
 end
 

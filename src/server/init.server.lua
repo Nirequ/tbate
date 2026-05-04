@@ -3,6 +3,13 @@
 
 print("=== TBATE RPG Server Starting ===")
 
+local Players = game:GetService("Players")
+
+-- В этом Place игрок проводит всё время в UI редактора персонажа,
+-- поэтому отключаем автоматический спавн — никаких лишних R15-аватаров
+-- в воркспейсе.
+Players.CharacterAutoLoads = false
+
 -- Load shared modules
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")

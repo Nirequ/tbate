@@ -763,10 +763,14 @@ local function CreateMiniPreviewButton(id, displayName, kind, asset)
 			camera.CFrame = CFrame.lookAt(Vector3.new(0, 2.0, -3.2), Vector3.new(0, 1.5, 0))
 		elseif kind == "face" then
 			-- Tight close-up on the front of the head so the face decal
-			-- (eyes + mouth) is fully readable. Head center is at y≈1.5.
+			-- (eyes + mouth) fills the thumbnail. R6 head center is at
+			-- y≈1.5 and the head is ~1 stud tall, so we sit the camera
+			-- 1.4 studs in front of the head and look straight at its
+			-- center — at the default 70° FOV that pushes the head
+			-- almost edge-to-edge in the mini-preview frame.
 			-- BuildSingleAssetDescription leaves hair off for face minis
 			-- so the decal isn't covered by a fringe.
-			camera.CFrame = CFrame.lookAt(Vector3.new(0, 1.5, -2.2), Vector3.new(0, 1.5, 0))
+			camera.CFrame = CFrame.lookAt(Vector3.new(0, 1.5, -1.4), Vector3.new(0, 1.5, 0))
 		elseif kind == "shirt" then
 			-- Torso center is at y=0; pull camera back enough that the
 			-- whole shirt (HRP±1) is comfortably in frame.

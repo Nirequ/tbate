@@ -56,14 +56,14 @@ CharacterConfig.HAIRSTYLES = {
 -- Available clothing options (catalog asset IDs)
 CharacterConfig.CLOTHING = {
 	Shirts = {
-		{Name = "Простая рубашка", AssetId = 607785314},    -- Red Roblox Jacket
-		{Name = "Кожаная броня", AssetId = 607702162},      -- Leather Vest
-		{Name = "Магическая роба", AssetId = 1340912704}    -- Wizard Robe
+		{Name = "Простая рубашка", AssetId = 75963774189458},    -- Red Roblox Jacket
+		{Name = "Кожаная броня", AssetId = 127024238577346},      -- Leather Vest
+		{Name = "Магическая роба", AssetId = 106568140379876}    -- Wizard Robe
 	},
 	Pants = {
-		{Name = "Простые штаны", AssetId = 607786413},      -- Jeans
-		{Name = "Кожаные штаны", AssetId = 86896501},       -- Leather Pants
-		{Name = "Магические штаны", AssetId = 1340912869}   -- Wizard Pants
+		{Name = "Простые штаны", AssetId = 1736042024},      -- Jeans
+		{Name = "Кожаные штаны", AssetId = 85767393275851},       -- Leather Pants
+		{Name = "Магические штаны", AssetId = 4863136941}   -- Wizard Pants
 	}
 }
 

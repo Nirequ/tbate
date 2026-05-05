@@ -8,7 +8,7 @@ local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- DataStore (должен совпадать с Character Creation Place)
-local CharacterDataStore = DataStoreService:GetDataStore("CharacterData_v1")
+local CharacterDataStore = DataStoreService:GetDataStore("CharacterData_v2")
 
 -- Конфигурация рас (скопируйте из CharacterConfig.lua)
 local RACES = {
@@ -55,6 +55,46 @@ local function BuildDescription(characterData)
 			description.RightArmColor = c
 			description.LeftLegColor = c
 			description.RightLegColor = c
+		end
+		
+		-- Применить прическу
+		if characterData.HairstyleIndex then
+			local hairstyles = {
+				{AssetId = 4819720316},  -- Короткие волосы
+				{AssetId = 62234425},    -- Длинные волосы
+				{AssetId = 11377306},    -- Косички
+				{AssetId = 0}            -- Лысый
+			}
+			local hairstyle = hairstyles[characterData.HairstyleIndex]
+			if hairstyle and hairstyle.AssetId > 0 then
+				description.HairAccessory = hairstyle.AssetId
+			end
+		end
+		
+		-- Применить одежду (рубашка)
+		if characterData.ShirtIndex then
+			local shirts = {
+				{AssetId = 607785314},    -- Простая рубашка
+				{AssetId = 607702162},    -- Кожаная броня
+				{AssetId = 1340912704}    -- Магическая роба
+			}
+			local shirt = shirts[characterData.ShirtIndex]
+			if shirt and shirt.AssetId > 0 then
+				description.Shirt = shirt.AssetId
+			end
+		end
+		
+		-- Применить одежду (штаны)
+		if characterData.PantsIndex then
+			local pants = {
+				{AssetId = 607786413},    -- Простые штаны
+				{AssetId = 86896501},     -- Кожаные штаны
+				{AssetId = 1340912869}    -- Магические штаны
+			}
+			local pant = pants[characterData.PantsIndex]
+			if pant and pant.AssetId > 0 then
+				description.Pants = pant.AssetId
+			end
 		end
 	end
 	return description
@@ -117,7 +157,45 @@ local function ApplyAppearance(character, characterData)
 		humanoidDescription.RightLegColor = color
 	end
 	
-	-- TODO: Применить прическу и одежду по AssetId
+	-- Применить прическу
+	if characterData.HairstyleIndex then
+		local hairstyles = {
+			{AssetId = 4819720316},  -- Короткие волосы
+			{AssetId = 62234425},    -- Длинные волосы
+			{AssetId = 11377306},    -- Косички
+			{AssetId = 0}            -- Лысый
+		}
+		local hairstyle = hairstyles[characterData.HairstyleIndex]
+		if hairstyle and hairstyle.AssetId > 0 then
+			humanoidDescription.HairAccessory = hairstyle.AssetId
+		end
+	end
+	
+	-- Применить одежду (рубашка)
+	if characterData.ShirtIndex then
+		local shirts = {
+			{AssetId = 607785314},    -- Простая рубашка
+			{AssetId = 607702162},    -- Кожаная броня
+			{AssetId = 1340912704}    -- Магическая роба
+		}
+		local shirt = shirts[characterData.ShirtIndex]
+		if shirt and shirt.AssetId > 0 then
+			humanoidDescription.Shirt = shirt.AssetId
+		end
+	end
+	
+	-- Применить одежду (штаны)
+	if characterData.PantsIndex then
+		local pants = {
+			{AssetId = 607786413},    -- Простые штаны
+			{AssetId = 86896501},     -- Кожаные штаны
+			{AssetId = 1340912869}    -- Магические штаны
+		}
+		local pant = pants[characterData.PantsIndex]
+		if pant and pant.AssetId > 0 then
+			humanoidDescription.Pants = pant.AssetId
+		end
+	end
 	
 	humanoid:ApplyDescription(humanoidDescription)
 	

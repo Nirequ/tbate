@@ -340,19 +340,42 @@ local function AnchorRig(model)
 end
 
 -- Spawn (or rebuild) the player-preview character directly in Workspace.
+--
+-- Race / hairstyle / clothing changes can fire faster than a rig builds
+-- (CreateHumanoidModelFromDescription yields while it pulls assets), so
+-- we use a generation counter to discard rigs that finished building
+-- after a newer call took over. We also sweep any orphan
+-- "PreviewCharacter" already in the workspace before spawning a new
+-- one — without that sweep, a rig from an in-flight call could parent
+-- itself in *after* worldCharacter was reassigned, leaving a duplicate
+-- behind for every fast click.
+local previewGeneration = 0
 function CharacterEditorUI.UpdatePreview()
+	previewGeneration = previewGeneration + 1
+	local myGeneration = previewGeneration
 	local description = BuildCurrentDescription()
 
-	if worldCharacter then
-		worldCharacter:Destroy()
-		worldCharacter = nil
+	for _, child in ipairs(Workspace:GetChildren()) do
+		if child.Name == "PreviewCharacter" then
+			child:Destroy()
+		end
 	end
+	worldCharacter = nil
 
 	local character = BuildR6Rig(description)
 	if not character then
 		warn("CharacterEditorUI: cannot create world preview character")
 		return
 	end
+
+	-- A newer UpdatePreview call superseded us while BuildR6Rig was
+	-- yielding on asset loads; throw this rig away instead of leaking
+	-- it into the workspace as a duplicate.
+	if myGeneration ~= previewGeneration then
+		character:Destroy()
+		return
+	end
+
 	-- Use a name that won't show up over the character; the floating
 	-- "TBATE_PreviewCharacter" label was distracting.
 	character.Name = "PreviewCharacter"
@@ -389,7 +412,7 @@ function CharacterEditorUI.UpdatePreview()
 	TintHair(character, currentHairColor)
 	for _, delaySeconds in ipairs({0.1, 0.5, 1.5, 3.0}) do
 		task.delay(delaySeconds, function()
-			if character.Parent then
+			if character.Parent and myGeneration == previewGeneration then
 				TintHair(character, currentHairColor)
 				-- Re-anchor only the HRP — accessories (hair) need to stay
 				-- non-anchored so their welds keep them attached to the head.

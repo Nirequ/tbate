@@ -289,6 +289,12 @@ end
 -- via Attachments — anchoring them too would freeze them at their initial
 -- position before the welds positioned them, which is why hair was
 -- floating off in space.
+--
+-- We deliberately don't set humanoid.PlatformStand = true: it puts the
+-- Humanoid into a ragdoll-like state where Motor6Ds go limp and the
+-- limbs flop / drift away from the torso. Anchoring the HRP plus
+-- WalkSpeed/JumpPower=0 (set in BuildR6Rig) is enough to hold the rig
+-- still while the idle animation plays normally.
 local function AnchorRig(model)
 	if not model then return end
 	for _, descendant in ipairs(model:GetDescendants()) do
@@ -299,12 +305,6 @@ local function AnchorRig(model)
 	local hrp = model:FindFirstChild("HumanoidRootPart")
 	if hrp then
 		hrp.Anchored = true
-	end
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		-- Stop the Humanoid from playing default animations / falling.
-		humanoid.PlatformStand = true
-		humanoid.AutoRotate = false
 	end
 end
 
@@ -342,6 +342,14 @@ function CharacterEditorUI.UpdatePreview()
 	end)
 
 	PlaceCharacterOnSpawn(character)
+	-- Anchor the HRP BEFORE parenting so physics doesn't get a chance to
+	-- run a tick on the unanchored rig and drift it before AnchorRig
+	-- finishes (the visible "flying / floating" symptom users were
+	-- seeing when swapping race / hair / clothing).
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if hrp then
+		hrp.Anchored = true
+	end
 	character.Parent = Workspace
 	AnchorRig(character)
 	worldCharacter = character

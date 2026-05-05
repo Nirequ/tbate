@@ -61,6 +61,20 @@ RemoteObjects.TeleportToMainGameFunction.OnServerInvoke = function(player)
 	return {success = success, message = message}
 end
 
+-- Debug-only: wipe a player's saved character slots so the editor can
+-- be tested from a clean state. RunService:IsStudio() is true ONLY in
+-- Studio (both Edit and playtest); in a published place it returns
+-- false, so the remote is a no-op there even though the client can see
+-- the function. This keeps the debug button safe to ship.
+local RunService = game:GetService("RunService")
+RemoteObjects.ResetCharacterSlotsFunction.OnServerInvoke = function(player)
+	if not RunService:IsStudio() then
+		return {success = false, message = "Reset is Studio-only"}
+	end
+	local ok = DataStoreService.ResetCharacterSlots(player)
+	return {success = ok, message = ok and "Slots reset" or "Reset failed"}
+end
+
 print("=== TBATE RPG Server Ready ===")
 print("Character creation system initialized")
 print("Waiting for players...")

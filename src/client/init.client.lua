@@ -99,12 +99,12 @@ ShowSlotSelection = function()
 	-- Setup handlers
 	SlotSelectionUI.SetupHandlers(slotUI, slotsData, function(slotIndex, characterData)
 		currentSlotIndex = slotIndex
-		
+
 		if characterData then
 			-- Character exists, load it
 			print("Loading existing character from slot", slotIndex)
 			local success, message = CharacterController.LoadCharacter(slotIndex)
-			
+
 			if success then
 				print("Character loaded successfully!")
 				-- Teleport to main game
@@ -118,6 +118,11 @@ ShowSlotSelection = function()
 			print("Creating new character in slot", slotIndex)
 			ShowCharacterEditor()
 		end
+	end, function()
+		-- [DEBUG] Reset slots: re-show this screen so the wiped state
+		-- is reflected (slots 2/3 locked again, slot 1 empty).
+		print("Slots reset; refreshing slot selection")
+		ShowSlotSelection()
 	end)
 	
 	currentUI = slotUI

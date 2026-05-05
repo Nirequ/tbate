@@ -46,6 +46,14 @@ function CharacterController.TeleportToMainGame()
 	return result.success, result.message
 end
 
+-- Debug-only: ask the server to wipe the player's saved slots. The
+-- server-side handler refuses the call outside of Studio, so this is
+-- a no-op in published places.
+function CharacterController.ResetCharacterSlots()
+	local result = RemoteObjects.ResetCharacterSlotsFunction:InvokeServer()
+	return result.success, result.message
+end
+
 -- Set selected slot
 function CharacterController.SetSelectedSlot(slotIndex)
 	selectedSlot = slotIndex

@@ -147,6 +147,24 @@ function DataStore.DeleteCharacter(player, slotIndex)
 	return true
 end
 
+-- Wipe ALL character slot data for a player (debug-only).
+-- Used by the in-game "Reset slots" button in Studio so we can
+-- iterate on character creation without manually clearing the DataStore.
+-- The caller (init.server.lua) is responsible for gating this with
+-- RunService:IsStudio() so it can never be invoked from a live game.
+function DataStore.ResetCharacterSlots(player)
+	local userId = player.UserId
+	local success, err = pcall(function()
+		CharacterDataStore:RemoveAsync("Player_" .. userId)
+	end)
+	if not success then
+		warn("Failed to reset slots for player:", player.Name, "Error:", err)
+		return false
+	end
+	print("Reset all slots for player:", player.Name)
+	return true
+end
+
 -- Initialize service
 function DataStore.Init()
 	print("DataStoreService initialized")

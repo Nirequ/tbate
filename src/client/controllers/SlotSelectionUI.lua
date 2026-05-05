@@ -4,6 +4,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CharacterController = require(script.Parent.Parent.controllers.CharacterController)
@@ -157,6 +158,30 @@ function SlotSelectionUI.CreateUI()
 		end
 	end
 	
+	-- Debug-only "Reset slots" button: only shown when running inside
+	-- Studio. Wipes the player's saved slot data so the editor can be
+	-- exercised from a clean state without poking the DataStore by
+	-- hand. The actual reset is performed server-side and gated again
+	-- with RunService:IsStudio() there for safety.
+	if RunService:IsStudio() then
+		local resetButton = Instance.new("TextButton")
+		resetButton.Name = "DebugResetButton"
+		resetButton.Size = UDim2.new(0, 220, 0, 36)
+		resetButton.AnchorPoint = Vector2.new(1, 1)
+		resetButton.Position = UDim2.new(1, -16, 1, -16)
+		resetButton.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
+		resetButton.Text = "[DEBUG] СБРОСИТЬ СЛОТЫ"
+		resetButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+		resetButton.TextSize = 14
+		resetButton.Font = Enum.Font.GothamBold
+		resetButton.AutoButtonColor = true
+		resetButton.Parent = background
+
+		local resetCorner = Instance.new("UICorner")
+		resetCorner.CornerRadius = UDim.new(0, 6)
+		resetCorner.Parent = resetButton
+	end
+
 	screenGui.Parent = playerGui
 	return screenGui
 end
@@ -207,10 +232,33 @@ function SlotSelectionUI.UpdateUI(screenGui, slotsData)
 	end
 end
 
--- Setup button handlers
-function SlotSelectionUI.SetupHandlers(screenGui, slotsData, onSlotSelected)
+-- Setup button handlers.
+-- onSlotSelected(slotIndex, characterData) — fired when the player
+--   picks one of the three slots.
+-- onResetClicked() — fired when the [DEBUG] reset button is clicked
+--   in Studio. The caller is expected to re-show this screen so the
+--   wiped state is reflected. Optional; ignored when nil or when the
+--   button isn't visible (i.e. outside Studio).
+function SlotSelectionUI.SetupHandlers(screenGui, slotsData, onSlotSelected, onResetClicked)
 	local slotsContainer = screenGui.Background.SlotsContainer
-	
+	local resetButton = screenGui.Background:FindFirstChild("DebugResetButton")
+	if resetButton and onResetClicked then
+		resetButton.MouseButton1Click:Connect(function()
+			-- Disable while the request is in flight so the user can't
+			-- queue up duplicate resets.
+			resetButton.Active = false
+			resetButton.Text = "Сбрасываю..."
+			local ok, message = CharacterController.ResetCharacterSlots()
+			if not ok then
+				warn("Reset slots failed:", message)
+				resetButton.Active = true
+				resetButton.Text = "[DEBUG] СБРОСИТЬ СЛОТЫ"
+				return
+			end
+			onResetClicked()
+		end)
+	end
+
 	for i = 1, CharacterConfig.MAX_SLOTS do
 		local slotFrame = slotsContainer:FindFirstChild("Slot" .. i)
 		if not slotFrame then continue end

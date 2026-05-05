@@ -46,12 +46,21 @@ if isServer then
 	teleportToMainGameFunction.Parent = remotesFolder
 	print("Created TeleportToMainGameFunction")
 
+	-- Debug-only: wipe all of a player's saved character slots. The
+	-- server handler refuses the call outside of Studio, so the remote
+	-- itself can ship in production without being abusable.
+	local resetCharacterSlotsFunction = Instance.new("RemoteFunction")
+	resetCharacterSlotsFunction.Name = "ResetCharacterSlotsFunction"
+	resetCharacterSlotsFunction.Parent = remotesFolder
+	print("Created ResetCharacterSlotsFunction")
+
 	-- Export references
 	RemoteObjects.GetCharacterSlotsFunction = getCharacterSlotsFunction
 	RemoteObjects.CreateCharacterFunction = createCharacterFunction
 	RemoteObjects.LoadCharacterFunction = loadCharacterFunction
 	RemoteObjects.UnlockSlotFunction = unlockSlotFunction
 	RemoteObjects.TeleportToMainGameFunction = teleportToMainGameFunction
+	RemoteObjects.ResetCharacterSlotsFunction = resetCharacterSlotsFunction
 else
 	-- Client waits for remotes to replicate from server
 	if not remotesFolder then
@@ -65,6 +74,7 @@ else
 		RemoteObjects.LoadCharacterFunction = remotesFolder:WaitForChild("LoadCharacterFunction", 10)
 		RemoteObjects.UnlockSlotFunction = remotesFolder:WaitForChild("UnlockSlotFunction", 10)
 		RemoteObjects.TeleportToMainGameFunction = remotesFolder:WaitForChild("TeleportToMainGameFunction", 10)
+		RemoteObjects.ResetCharacterSlotsFunction = remotesFolder:WaitForChild("ResetCharacterSlotsFunction", 10)
 		print("Client found all RemoteObjects")
 	else
 		warn("Client failed to find Remotes folder!")

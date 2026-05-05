@@ -1,85 +1,73 @@
--- Main Game Server Script
--- Загружает персонажей игроков из DataStore и применяет их характеристики
+-- Main Game Server (standalone for Place 2 — the actual gameplay
+-- place that the character-creation place teleports the player to).
+--
+-- This script lives outside src/ because it ships with Place 2, which
+-- is a SEPARATE Roblox place from the character-creation place. The
+-- two places share a DataStore name but they cannot share Roblox
+-- ModuleScripts the way the rest of the project does — every script
+-- under ReplicatedStorage / ServerScriptService is per-place.
+--
+-- IMPORTANT — keeping CONFIG in sync:
+-- The CONFIG table below MUST mirror src/shared/CharacterConfig.lua.
+-- When you change race / asset IDs in CharacterConfig, copy the new
+-- values into CONFIG here as well, otherwise teleported players spawn
+-- with stale clothing / faces / scaling.
 
 print("=== TBATE RPG Main Game Server Starting ===")
 
 local Players = game:GetService("Players")
 local DataStoreService = game:GetService("DataStoreService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- DataStore (должен совпадать с Character Creation Place)
-local CharacterDataStore = DataStoreService:GetDataStore("CharacterData_v1")
+-- Must match the DataStore name used by the character-creation place
+-- (src/server/services/DataStoreService.lua), otherwise saved
+-- characters won't load here after teleport.
+local CharacterDataStore = DataStoreService:GetDataStore("CharacterData_v2")
 
--- Конфигурация рас (скопируйте из CharacterConfig.lua)
-local RACES = {
-	Human = {
-		Name = "Человек",
-		HeightScale = 1.0,
-		WidthScale = 1.0,
-		HeadScale = 1.0,
-		BodyTypeScale = 1.0,
-		HasEars = false,
-		EarAssetId = nil,
+-- =================================================================
+-- CONFIG — keep in sync with src/shared/CharacterConfig.lua.
+-- =================================================================
+local CONFIG = {
+	RACES = {
+		Human = {
+			HeightScale = 1.0, WidthScale = 1.0,
+			HeadScale = 1.0,  BodyTypeScale = 1.0,
+			HasEars = false,  EarAssetId = nil,
+		},
+		Elf = {
+			HeightScale = 1.15, WidthScale = 0.95,
+			HeadScale = 1.0,    BodyTypeScale = 0.95,
+			HasEars = true,     EarAssetId = 242662351524411,
+		},
+		Dwarf = {
+			HeightScale = 0.75, WidthScale = 1.15,
+			HeadScale = 1.1,    BodyTypeScale = 1.2,
+			HasEars = false,    EarAssetId = nil,
+		},
 	},
-	Elf = {
-		Name = "Эльф",
-		HeightScale = 1.15,
-		WidthScale = 0.95,
-		HeadScale = 1.0,
-		BodyTypeScale = 0.95,
-		HasEars = true,
-		EarAssetId = 242662351524411,
-	},
-	Dwarf = {
-		Name = "Дварф",
-		HeightScale = 0.75,
-		WidthScale = 1.15,
-		HeadScale = 1.1,
-		BodyTypeScale = 1.2,
-		HasEars = false,
-		EarAssetId = nil,
-	}
+	-- Indexed asset arrays. The character-creation editor stores the
+	-- player's pick as an index into the corresponding array; we look
+	-- the asset ID up by that index here.
+	HAIRSTYLES = { 97714842615043, 93559114730036, 140687194936636, 0 },
+	FACES      = {       7074786,       28999228,        7074774, 7074825, 0 },
+	SHIRTS     = { 113764433325496,     5261079458, 113319764815263 },
+	PANTS      = {      1736042024,    12551073709,      9157798320 },
 }
 
--- Asset ID лежат в HumanoidDescription.HairAccessory / Face / Shirt /
--- Pants; держим список в этом скрипте чтобы не дёргать общий конфиг
--- (это standalone-скрипт для Place 2). Если меняешь shared/CharacterConfig
--- — продублируй значения сюда же, иначе персонаж в основном игровом
--- месте загрузится со старой одеждой/лицом.
-local HAIRSTYLES = {
-	[1] = 97714842615043,
-	[2] = 93559114730036,
-	[3] = 140687194936636,
-	[4] = 0,
-}
-local FACES = {
-	[1] = 7074786,
-	[2] = 28999228,
-	[3] = 7074774,
-	[4] = 7074825,
-	[5] = 0,
-}
-local SHIRTS = {
-	[1] = 113764433325496,
-	[2] = 5261079458,
-	[3] = 113319764815263,
-}
-local PANTS = {
-	[1] = 1736042024,
-	[2] = 12551073709,
-	[3] = 9157798320,
-}
+-- =================================================================
+-- HumanoidDescription construction.
+-- =================================================================
 
--- Build a HumanoidDescription that fully matches what the player picked
--- in the editor: race scales, skin color, hair, ears, shirt, pants. Used
--- to spawn a fresh R6 character so the rig is always blocky.
+-- Build a HumanoidDescription that fully matches what the player
+-- picked in the editor: race scales (cosmetic only on R6 — the actual
+-- visual scaling happens via Model:ScaleTo in SpawnCharacter), skin
+-- color, hair, ears, face, shirt, pants.
 local function BuildDescription(characterData)
 	local description = Instance.new("HumanoidDescription")
 	if not characterData then
 		return description
 	end
 
-	local race = RACES[characterData.Race]
+	local race = CONFIG.RACES[characterData.Race]
 	if race then
 		description.HeightScale = race.HeightScale
 		description.WidthScale = race.WidthScale
@@ -100,51 +88,46 @@ local function BuildDescription(characterData)
 		description.RightLegColor = c
 	end
 
-	local hairId = HAIRSTYLES[characterData.HairstyleIndex]
-	if hairId and hairId > 0 then
-		description.HairAccessory = tostring(hairId)
+	-- Helper for "look up asset id by index, set field if nonzero".
+	local function setIfPresent(arr, idx, fieldName, asString)
+		local id = arr[idx]
+		if id and id > 0 then
+			description[fieldName] = asString and tostring(id) or id
+		end
 	end
 
-	local faceId = FACES[characterData.FaceIndex]
-	if faceId and faceId > 0 then
-		description.Face = faceId
-	end
-
-	local shirtId = SHIRTS[characterData.ShirtIndex]
-	if shirtId and shirtId > 0 then
-		description.Shirt = shirtId
-	end
-	local pantsId = PANTS[characterData.PantsIndex]
-	if pantsId and pantsId > 0 then
-		description.Pants = pantsId
-	end
+	setIfPresent(CONFIG.HAIRSTYLES, characterData.HairstyleIndex, "HairAccessory", true)
+	setIfPresent(CONFIG.FACES,      characterData.FaceIndex,      "Face",          false)
+	setIfPresent(CONFIG.SHIRTS,     characterData.ShirtIndex,     "Shirt",         false)
+	setIfPresent(CONFIG.PANTS,      characterData.PantsIndex,     "Pants",         false)
 
 	return description
 end
 
--- Применить характеристики расы к персонажу (на случай если описание
--- было применено не полностью — например, рёлоадим существующего).
-local function ApplyRaceModifications(character, race)
-	local raceData = RACES[race]
-	if not raceData then
-		warn("Invalid race:", race)
-		return
+-- =================================================================
+-- Hair recolouring after spawn.
+-- =================================================================
+
+local function isHairAccessory(accessory)
+	if accessory.AccessoryType == Enum.AccessoryType.Hair then
+		return true
 	end
-	
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then return end
-	
-	local humanoidDescription = humanoid:GetAppliedDescription()
-	
-	-- Применить модификации расы
-	humanoidDescription.HeightScale = raceData.HeightScale
-	humanoidDescription.WidthScale = raceData.WidthScale
-	humanoidDescription.HeadScale = raceData.HeadScale
-	humanoidDescription.BodyTypeScale = raceData.BodyTypeScale
-	
-	humanoid:ApplyDescription(humanoidDescription)
-	
-	print("Applied race modifications:", race, "to", character.Name)
+	return accessory.Name:lower():find("hair") ~= nil
+end
+
+local function tintAccessory(accessory, color)
+	for _, part in ipairs(accessory:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Color = color
+		elseif part:IsA("SpecialMesh") then
+			part.VertexColor = Vector3.new(color.R, color.G, color.B)
+		elseif part:IsA("SurfaceAppearance") then
+			pcall(function()
+				part.ColorMap = ""
+				part.AlphaMode = Enum.AlphaMode.Overlay
+			end)
+		end
+	end
 end
 
 -- Tint every hair-style accessory currently parented to the character.
@@ -154,41 +137,20 @@ end
 local function TintHair(character, color)
 	if not color then return end
 	for _, descendant in ipairs(character:GetDescendants()) do
-		if descendant:IsA("Accessory") then
-			local isHair = descendant.AccessoryType == Enum.AccessoryType.Hair
-			if not isHair then
-				isHair = descendant.Name:lower():find("hair") ~= nil
-			end
-			if isHair then
-				for _, part in ipairs(descendant:GetDescendants()) do
-					if part:IsA("BasePart") then
-						part.Color = color
-					elseif part:IsA("SpecialMesh") then
-						part.VertexColor = Vector3.new(color.R, color.G, color.B)
-					elseif part:IsA("SurfaceAppearance") then
-						pcall(function()
-							part.ColorMap = ""
-							part.AlphaMode = Enum.AlphaMode.Overlay
-						end)
-					end
-				end
-			end
+		if descendant:IsA("Accessory") and isHairAccessory(descendant) then
+			tintAccessory(descendant, color)
 		end
 	end
 end
 
--- BuildDescription уже включает hair / shirt / pants / ears / colors,
--- так что ApplyAppearance остаётся только подкрасить волосы (это
--- делается после ApplyDescription, чтобы не быть перезаписанным).
-local function ApplyAppearance(character, characterData)
-	TintHair(character, characterData.HairColor)
-	print("Applied appearance to", character.Name)
-end
+-- =================================================================
+-- Spawning.
+-- =================================================================
 
--- Отключаем автоспавн, чтобы строить R6-риг вручную из HumanoidDescription
+-- Disable autospawn — we build the R6 rig manually from the
+-- HumanoidDescription so the character is always blocky.
 Players.CharacterAutoLoads = false
 
--- Найти место спавна (SpawnLocation в Workspace) или дать запасную точку.
 local function GetSpawnCFrame()
 	local spawn = workspace:FindFirstChildOfClass("SpawnLocation")
 	if spawn then
@@ -197,9 +159,7 @@ local function GetSpawnCFrame()
 	return CFrame.new(0, 10, 0)
 end
 
--- Спавн R6-персонажа с применённой внешностью.
 local function SpawnCharacter(player, characterData)
-	-- Удалить предыдущего персонажа, если он остался
 	if player.Character then
 		player.Character:Destroy()
 	end
@@ -223,7 +183,7 @@ local function SpawnCharacter(player, characterData)
 	-- R6 ignores HumanoidDescription scale fields, so apply the race
 	-- height ratio uniformly via Model:ScaleTo. Same approach as the
 	-- editor preview so the spawned character matches it visually.
-	local raceData = characterData and RACES[characterData.Race]
+	local raceData = characterData and CONFIG.RACES[characterData.Race]
 	local raceScale = (raceData and raceData.HeightScale) or 1.0
 	pcall(function()
 		character:ScaleTo(raceScale)
@@ -237,7 +197,6 @@ local function SpawnCharacter(player, characterData)
 	character.Parent = workspace
 	player.Character = character
 
-	-- Авто-респавн при смерти
 	if humanoid then
 		humanoid.Died:Connect(function()
 			task.wait(Players.RespawnTime)
@@ -250,20 +209,23 @@ local function SpawnCharacter(player, characterData)
 	return character
 end
 
--- Загрузить персонажа игрока
+-- =================================================================
+-- Loading.
+-- =================================================================
+
+-- Pull saved character data from the DataStore, pick the first non-
+-- empty slot as the active character, spawn it, and re-apply hair
+-- colour (BuildDescription already covers everything else).
 local function LoadPlayerCharacter(player)
 	print("Loading character for player:", player.Name)
-	
-	-- Загрузить данные из DataStore
+
 	local success, data = pcall(function()
 		return CharacterDataStore:GetAsync("Player_" .. player.UserId)
 	end)
-	
 	if not success then
 		warn("Failed to load character data for:", player.Name)
 	end
-	
-	-- Найти активного персонажа (последний созданный) — может быть nil
+
 	local activeCharacter = nil
 	if data and data.Characters then
 		for i = 1, 3 do
@@ -274,26 +236,23 @@ local function LoadPlayerCharacter(player)
 		end
 	end
 
-	if not activeCharacter then
-		warn("No active character found for:", player.Name, "- spawning default R6 character")
-	else
-		print("Found character data:", activeCharacter.Race)
-	end
-
-	-- Спавним R6-риг с уже применёнными scales и цветом кожи
-	local character = SpawnCharacter(player, activeCharacter)
-	if not character then
-		return
-	end
-
-	-- Дополнительно применить аксессуары / цвет волос (то, что не входит
-	-- в HumanoidDescription напрямую).
 	if activeCharacter then
-		ApplyRaceModifications(character, activeCharacter.Race)
-		ApplyAppearance(character, activeCharacter)
+		print("Found character data:", activeCharacter.Race)
+	else
+		warn("No active character found for:", player.Name, "- spawning default R6 character")
 	end
 
-	-- Сохранить данные персонажа в player для доступа из других скриптов
+	local character = SpawnCharacter(player, activeCharacter)
+	if not character then return end
+
+	-- Hair colour isn't part of HumanoidDescription, so apply it after
+	-- spawning. Skin colour, accessories and clothing already came
+	-- through the description.
+	if activeCharacter then
+		TintHair(character, activeCharacter.HairColor)
+	end
+
+	-- Expose the loaded race to other scripts via player.CharacterData.
 	local existing = player:FindFirstChild("CharacterData")
 	if existing then existing:Destroy() end
 
@@ -305,11 +264,13 @@ local function LoadPlayerCharacter(player)
 	raceValue.Name = "Race"
 	raceValue.Value = (activeCharacter and activeCharacter.Race) or "Human"
 	raceValue.Parent = characterDataValue
-	
+
 	print("Character loaded successfully for:", player.Name)
 end
 
--- Обработка входа игрока
+-- =================================================================
+-- Wire up player join / already-present.
+-- =================================================================
 Players.PlayerAdded:Connect(function(player)
 	print("Player joined:", player.Name)
 	LoadPlayerCharacter(player)

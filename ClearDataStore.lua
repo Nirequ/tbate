@@ -4,7 +4,8 @@
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
 
-local CharacterDataStore = DataStoreService:GetDataStore("CharacterData_v1")
+-- Must match the DataStore name in src/server/services/DataStoreService.lua.
+local CharacterDataStore = DataStoreService:GetDataStore("CharacterData_v2")
 
 -- Очистить данные для всех игроков в игре
 for _, player in pairs(Players:GetPlayers()) do

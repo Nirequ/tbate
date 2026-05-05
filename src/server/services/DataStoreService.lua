@@ -7,7 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CharacterConfig = require(Shared:WaitForChild("CharacterConfig"))
 
-local CharacterDataStore = DataStoreService:GetDataStore("CharacterData_v2")  -- Изменили v1 на v2
+local CharacterDataStore = DataStoreService:GetDataStore("CharacterData_v2")  -- bumped from v1
 
 local DataStore = {}
 

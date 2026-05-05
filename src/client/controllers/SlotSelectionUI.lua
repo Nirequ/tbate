@@ -49,7 +49,7 @@ local function CreateLockOverlay(slotIndex)
 	unlockButton.Size = UDim2.new(0, 200, 0, 50)
 	unlockButton.Position = UDim2.new(0.5, -100, 0.7, 0)
 	unlockButton.BackgroundColor3 = Color3.fromRGB(200, 150, 50)
-	unlockButton.Text = "РАЗБЛОКИРОВАТЬ\n" .. CharacterConfig.SLOT_COSTS[slotIndex] .. " Robux"
+	unlockButton.Text = "UNLOCK\n" .. CharacterConfig.SLOT_COSTS[slotIndex] .. " Robux"
 	unlockButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 	unlockButton.TextSize = 16
 	unlockButton.Font = Enum.Font.GothamBold
@@ -81,7 +81,7 @@ local function CreateSlotFrame(slotIndex)
 	slotNumber.Size = UDim2.new(1, 0, 0, 50)
 	slotNumber.Position = UDim2.new(0, 0, 0, 10)
 	slotNumber.BackgroundTransparency = 1
-	slotNumber.Text = "СЛОТ " .. slotIndex
+	slotNumber.Text = "SLOT " .. slotIndex
 	slotNumber.TextColor3 = Color3.fromRGB(200, 200, 200)
 	slotNumber.TextSize = 24
 	slotNumber.Font = Enum.Font.GothamBold
@@ -103,7 +103,7 @@ local function CreateSlotFrame(slotIndex)
 	emptyText.Name = "EmptyText"
 	emptyText.Size = UDim2.new(1, 0, 1, 0)
 	emptyText.BackgroundTransparency = 1
-	emptyText.Text = "Пусто"
+	emptyText.Text = "Empty"
 	emptyText.TextColor3 = Color3.fromRGB(150, 150, 150)
 	emptyText.TextSize = 20
 	emptyText.Font = Enum.Font.Gotham
@@ -114,7 +114,7 @@ local function CreateSlotFrame(slotIndex)
 	selectButton.Size = UDim2.new(0, 240, 0, 50)
 	selectButton.Position = UDim2.new(0.5, -120, 1, -70)
 	selectButton.BackgroundColor3 = Color3.fromRGB(60, 150, 60)
-	selectButton.Text = "СОЗДАТЬ"
+	selectButton.Text = "CREATE"
 	selectButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 	selectButton.TextSize = 20
 	selectButton.Font = Enum.Font.GothamBold
@@ -143,7 +143,7 @@ local function CreateDebugResetButton()
 	resetButton.AnchorPoint = Vector2.new(1, 1)
 	resetButton.Position = UDim2.new(1, -16, 1, -16)
 	resetButton.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
-	resetButton.Text = "[DEBUG] СБРОСИТЬ СЛОТЫ"
+	resetButton.Text = "[DEBUG] RESET SLOTS"
 	resetButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 	resetButton.TextSize = 14
 	resetButton.Font = Enum.Font.GothamBold
@@ -178,7 +178,7 @@ function SlotSelectionUI.CreateUI()
 	title.Size = UDim2.new(0, 600, 0, 80)
 	title.Position = UDim2.new(0.5, -300, 0.1, 0)
 	title.BackgroundTransparency = 1
-	title.Text = "ВЫБЕРИТЕ СЛОТ ПЕРСОНАЖА"
+	title.Text = "CHOOSE A CHARACTER SLOT"
 	title.TextColor3 = Color3.fromRGB(255, 255, 255)
 	title.TextSize = 36
 	title.Font = Enum.Font.GothamBold
@@ -228,19 +228,19 @@ function SlotSelectionUI.UpdateUI(screenGui, slotsData)
 
 		if characterData then
 			if selectButton then
-				selectButton.Text = "ВЫБРАТЬ"
+				selectButton.Text = "SELECT"
 				selectButton.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
 			end
 			if emptyText then
-				emptyText.Text = characterData.Race or "Персонаж"
+				emptyText.Text = characterData.Race or "Character"
 			end
 		else
 			if selectButton then
-				selectButton.Text = "СОЗДАТЬ"
+				selectButton.Text = "CREATE"
 				selectButton.BackgroundColor3 = Color3.fromRGB(60, 150, 60)
 			end
 			if emptyText then
-				emptyText.Text = "Пусто"
+				emptyText.Text = "Empty"
 			end
 		end
 	end
@@ -262,12 +262,12 @@ function SlotSelectionUI.SetupHandlers(screenGui, slotsData, onSlotSelected, onR
 			-- Disable while the request is in flight so the user can't
 			-- queue up duplicate resets.
 			resetButton.Active = false
-			resetButton.Text = "Сбрасываю..."
+			resetButton.Text = "Resetting..."
 			local ok, message = CharacterController.ResetCharacterSlots()
 			if not ok then
 				warn("Reset slots failed:", message)
 				resetButton.Active = true
-				resetButton.Text = "[DEBUG] СБРОСИТЬ СЛОТЫ"
+				resetButton.Text = "[DEBUG] RESET SLOTS"
 				return
 			end
 			onResetClicked()

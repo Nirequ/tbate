@@ -14,8 +14,8 @@ CharacterConfig.SLOT_COSTS = {
 -- Race definitions with their visual modifications
 CharacterConfig.RACES = {
 	Human = {
-		Name = "Человек",
-		Description = "Сбалансированная раса без особых модификаций",
+		Name = "Human",
+		Description = "Balanced race with no special modifiers",
 		HeightScale = 1.0,
 		WidthScale = 1.0,
 		HeadScale = 1.0,
@@ -24,8 +24,8 @@ CharacterConfig.RACES = {
 		EarAssetId = nil
 	},
 	Elf = {
-		Name = "Эльф",
-		Description = "Высокая раса с длинными ушами",
+		Name = "Elf",
+		Description = "Tall race with long ears",
 		HeightScale = 1.15,
 		WidthScale = 0.95,
 		HeadScale = 1.0,
@@ -34,8 +34,8 @@ CharacterConfig.RACES = {
 		EarAssetId = 242662351524411
 	},
 	Dwarf = {
-		Name = "Дварф",
-		Description = "Низкорослая крепкая раса",
+		Name = "Dwarf",
+		Description = "Short and sturdy race",
 		HeightScale = 0.75,
 		WidthScale = 1.15,
 		HeadScale = 1.1,
@@ -47,10 +47,10 @@ CharacterConfig.RACES = {
 
 -- Available hairstyles (catalog asset IDs)
 CharacterConfig.HAIRSTYLES = {
-	{Name = "Короткие волосы", AssetId = 97714842615043},
-	{Name = "Длинные волосы", AssetId = 93559114730036},
-	{Name = "Женские длинные", AssetId = 140687194936636},
-	{Name = "Лысый", AssetId = 0}
+	{Name = "Short hair",       AssetId = 97714842615043},
+	{Name = "Long hair",        AssetId = 93559114730036},
+	{Name = "Long hair (alt)",  AssetId = 140687194936636},
+	{Name = "Bald",             AssetId = 0}
 }
 
 -- Available faces (catalog Decal asset IDs). Roblox stores a face as a
@@ -59,11 +59,11 @@ CharacterConfig.HAIRSTYLES = {
 -- expression. Swap these IDs for whatever Public Decals you want; the
 -- ones below are stock Roblox faces.
 CharacterConfig.FACES = {
-	{Name = "Улыбка",     AssetId = 7074786},
-	{Name = "Весёлый",    AssetId = 28999228},
-	{Name = "Хитрый",     AssetId = 7074774},
-	{Name = "Удивлённый", AssetId = 7074825},
-	{Name = "Без лица",   AssetId = 0}
+	{Name = "Smile",     AssetId = 7074786},
+	{Name = "Cheerful",  AssetId = 28999228},
+	{Name = "Sly",       AssetId = 7074774},
+	{Name = "Surprised", AssetId = 7074825},
+	{Name = "No face",   AssetId = 0}
 }
 
 -- Available clothing options (catalog asset IDs)
@@ -94,8 +94,8 @@ CharacterConfig.DEFAULT_CHARACTER = {
 }
 
 -- Teleport configuration
--- ВАЖНО: Замените 0 на Place ID вашего основного игрового места
--- Получить Place ID можно на create.roblox.com в разделе Places
+-- IMPORTANT: replace this with the Place ID of your main game place.
+-- You can find the Place ID at create.roblox.com under Places.
 CharacterConfig.MAIN_GAME_PLACE_ID = 87736930204659
 
 return CharacterConfig

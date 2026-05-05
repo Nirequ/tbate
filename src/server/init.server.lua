@@ -6,17 +6,18 @@ print("=== TBATE RPG Server Starting ===")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
--- В этом Place игрок проводит всё время в UI редактора персонажа,
--- поэтому отключаем автоматический спавн — никаких лишних R15-аватаров
--- в воркспейсе.
+-- The player spends all of their time in this Place inside the character
+-- editor UI, so disable automatic spawning — no stray R15 avatars in the
+-- workspace.
 Players.CharacterAutoLoads = false
 
--- Streaming для editor-плейса должен быть выключен вручную в свойствах
--- Workspace (в Studio: выбираем Workspace → Properties → StreamingEnabled
--- = false). Делать это из обычного Script больше нельзя — Roblox
--- требует script capability "Plugin", которой у нас нет, и попытка
--- присвоить значение бросает ошибку и обрывает init-скрипт. Но если
--- вдруг capability однажды появится, оборачиваем в pcall.
+-- StreamingEnabled has to be turned off manually in the editor place's
+-- Workspace properties (Studio: select Workspace → Properties →
+-- StreamingEnabled = false). Setting it from a regular Script is no
+-- longer allowed — Roblox now requires script capability "Plugin",
+-- which we don't have, and the assignment throws and aborts the init
+-- script. We still wrap the assignment in pcall in case the capability
+-- becomes available in the future.
 pcall(function()
 	Workspace.StreamingEnabled = false
 end)

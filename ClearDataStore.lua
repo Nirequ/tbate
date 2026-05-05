@@ -1,5 +1,5 @@
--- Скрипт для очистки данных персонажей
--- Вставьте этот код в Command Bar в Studio и нажмите Enter
+-- Wipes saved character slots for everyone currently in the server.
+-- Paste this into Studio's Command Bar (Server context) and press Enter.
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
@@ -7,7 +7,7 @@ local Players = game:GetService("Players")
 -- Must match the DataStore name in src/server/services/DataStoreService.lua.
 local CharacterDataStore = DataStoreService:GetDataStore("CharacterData_v2")
 
--- Очистить данные для всех игроков в игре
+-- Clear saved data for every player currently in the game.
 for _, player in pairs(Players:GetPlayers()) do
 	local success, err = pcall(function()
 		CharacterDataStore:RemoveAsync("Player_" .. player.UserId)

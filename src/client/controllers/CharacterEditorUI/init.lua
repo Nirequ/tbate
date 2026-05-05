@@ -61,10 +61,10 @@ local state = {
 -- hairstyle, face, shirt, pants. The race section is text-only and is
 -- handled separately because its key is a string, not an integer index.
 local CATEGORIES = {
-	{idPrefix = "Hairstyle", sectionId = "HairstyleSection", title = "ПРИЧЕСКА", kind = "hair",  options = CharacterConfig.HAIRSTYLES,            stateKey = "hairstyleIndex"},
-	{idPrefix = "Face",      sectionId = "FaceSection",      title = "ЛИЦО",     kind = "face",  options = CharacterConfig.FACES,                 stateKey = "faceIndex"},
-	{idPrefix = "Shirt",     sectionId = "ShirtSection",     title = "РУБАШКА",  kind = "shirt", options = CharacterConfig.CLOTHING.Shirts,       stateKey = "shirtIndex"},
-	{idPrefix = "Pants",     sectionId = "PantsSection",     title = "ШТАНЫ",    kind = "pants", options = CharacterConfig.CLOTHING.Pants,        stateKey = "pantsIndex"},
+	{idPrefix = "Hairstyle", sectionId = "HairstyleSection", title = "HAIR",  kind = "hair",  options = CharacterConfig.HAIRSTYLES,            stateKey = "hairstyleIndex"},
+	{idPrefix = "Face",      sectionId = "FaceSection",      title = "FACE",  kind = "face",  options = CharacterConfig.FACES,                 stateKey = "faceIndex"},
+	{idPrefix = "Shirt",     sectionId = "ShirtSection",     title = "SHIRT", kind = "shirt", options = CharacterConfig.CLOTHING.Shirts,       stateKey = "shirtIndex"},
+	{idPrefix = "Pants",     sectionId = "PantsSection",     title = "PANTS", kind = "pants", options = CharacterConfig.CLOTHING.Pants,        stateKey = "pantsIndex"},
 }
 
 local function getHairColor() return state.selection.hairColor end
@@ -230,7 +230,7 @@ function CharacterEditorUI.CreateUI()
 	title.Position = UDim2.new(0.3, 0, 0.04, 0)
 	title.Size = UDim2.new(0, 600, 0, 60)
 	title.BackgroundTransparency = 1
-	title.Text = "СОЗДАНИЕ ПЕРСОНАЖА"
+	title.Text = "CHARACTER CREATION"
 	title.TextColor3 = Color3.fromRGB(255, 255, 255)
 	title.TextSize = 32
 	title.Font = Enum.Font.GothamBold
@@ -266,7 +266,7 @@ function CharacterEditorUI.CreateUI()
 	panelPadding.Parent = optionsPanel
 
 	-- Race section (text buttons, races are few).
-	local raceSection, raceContent = UIBuilder.CreateSection(optionsPanel, "RaceSection", "РАСА")
+	local raceSection, raceContent = UIBuilder.CreateSection(optionsPanel, "RaceSection", "RACE")
 	raceSection.LayoutOrder = 1
 	UIBuilder.MakeGridContainer(raceContent, UDim2.new(0, 130, 0, 36))
 	for raceName, raceData in pairs(CharacterConfig.RACES) do
@@ -292,7 +292,7 @@ function CharacterEditorUI.CreateUI()
 	end
 
 	-- Skin colour picker.
-	local skinSection, skinContent = UIBuilder.CreateSection(optionsPanel, "SkinColorSection", "ЦВЕТ КОЖИ")
+	local skinSection, skinContent = UIBuilder.CreateSection(optionsPanel, "SkinColorSection", "SKIN COLOR")
 	skinSection.LayoutOrder = 6
 	local skinPicker = UIBuilder.CreateRGBColorPicker("SkinPicker", state.selection.skinColor, function(color)
 		state.selection.skinColor = color
@@ -303,7 +303,7 @@ function CharacterEditorUI.CreateUI()
 	skinPicker.Parent = skinContent
 
 	-- Hair colour picker.
-	local hairColorSection, hairColorContent = UIBuilder.CreateSection(optionsPanel, "HairColorSection", "ЦВЕТ ВОЛОС")
+	local hairColorSection, hairColorContent = UIBuilder.CreateSection(optionsPanel, "HairColorSection", "HAIR COLOR")
 	hairColorSection.LayoutOrder = 7
 	local hairPicker = UIBuilder.CreateRGBColorPicker("HairPicker", state.selection.hairColor, function(color)
 		state.selection.hairColor = color
@@ -327,7 +327,7 @@ function CharacterEditorUI.CreateUI()
 	backButton.Size = UDim2.new(0.45, -5, 1, 0)
 	backButton.Position = UDim2.new(0, 0, 0, 0)
 	backButton.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
-	backButton.Text = "НАЗАД"
+	backButton.Text = "BACK"
 	backButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 	backButton.TextSize = 18
 	backButton.Font = Enum.Font.GothamBold
@@ -343,7 +343,7 @@ function CharacterEditorUI.CreateUI()
 	confirmButton.Size = UDim2.new(0.55, -5, 1, 0)
 	confirmButton.Position = UDim2.new(0.45, 5, 0, 0)
 	confirmButton.BackgroundColor3 = Color3.fromRGB(60, 150, 60)
-	confirmButton.Text = "ПОДТВЕРДИТЬ"
+	confirmButton.Text = "CONFIRM"
 	confirmButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 	confirmButton.TextSize = 18
 	confirmButton.Font = Enum.Font.GothamBold

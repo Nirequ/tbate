@@ -4,11 +4,20 @@
 print("=== TBATE RPG Server Starting ===")
 
 local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
 
 -- В этом Place игрок проводит всё время в UI редактора персонажа,
 -- поэтому отключаем автоматический спавн — никаких лишних R15-аватаров
 -- в воркспейсе.
 Players.CharacterAutoLoads = false
+
+-- Отключаем streaming для editor-плейса. Здесь маленькая площадка
+-- (SpawnLocation / PreviewSpot + декорации), streaming только мешает:
+-- если SpawnLocation далеко от стартовой позиции камеры клиента,
+-- streaming его не подгружает, и наш клиентский поиск
+-- Workspace:FindFirstChild("PreviewSpot", true) ничего не находит.
+-- В Place 2 (основной мир) можно держать streaming включённым.
+Workspace.StreamingEnabled = false
 
 -- Load shared modules
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

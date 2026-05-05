@@ -107,6 +107,12 @@ local function BuildR6Rig(description)
 		humanoid.RigType = Enum.HumanoidRigType.R6
 		humanoid.WalkSpeed = 0
 		humanoid.JumpPower = 0
+		-- Hide the floating name / health gui that Roblox renders
+		-- above every Humanoid by default.
+		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		humanoid.NameDisplayDistance = 0
+		humanoid.HealthDisplayDistance = 0
+		humanoid.DisplayName = ""
 	end
 	SetSkinColor(rig, description.HeadColor)
 	return rig
@@ -166,6 +172,17 @@ local function BuildCurrentDescription()
 		description.WidthScale = raceData.WidthScale
 		description.HeadScale = raceData.HeadScale
 		description.BodyTypeScale = raceData.BodyTypeScale
+		-- R6 ignores HumanoidDescription scale fields — those only work on
+		-- R15. We still set them above for any code that reads them back
+		-- (DataStore round-trip), but the actual visual scaling for R6
+		-- happens via Model:ScaleTo() in UpdatePreview().
+
+		-- Race-specific accessories (e.g. elf ears) ride along on the
+		-- HatAccessory CSV slot so they don't conflict with the chosen
+		-- HairAccessory.
+		if raceData.HasEars and raceData.EarAssetId and raceData.EarAssetId > 0 then
+			description.HatAccessory = tostring(raceData.EarAssetId)
+		end
 	end
 
 	local hairstyle = CharacterConfig.HAIRSTYLES[currentHairstyle]
@@ -216,21 +233,15 @@ local function BuildSingleAssetDescription(kind, asset)
 	return description
 end
 
--- Pick the world anchor where the preview character should stand.
--- We want the rig's *feet* to sit exactly on top of the anchor's top
--- face, so we offset the HumanoidRootPart by spawn.Size.Y/2 (half the
--- thickness of the spawn pad) plus the leg height (~3 studs for an R6
--- rig: HRP is at the center of the torso and feet are 3 studs below).
+-- Pick the BasePart in the world we should stand the preview character
+-- on top of. A Part named "PreviewSpot" wins. Otherwise the first
+-- SpawnLocation we can find anywhere in the world (recursive — Folder /
+-- Model nesting is fine).
 local function ResolvePreviewAnchorPart()
-	-- A user-named PreviewSpot wins over everything — search recursively
-	-- so it's fine to nest it inside a Folder/Model.
 	local explicit = Workspace:FindFirstChild("PreviewSpot", true)
 	if explicit and explicit:IsA("BasePart") then
 		return explicit
 	end
-	-- Otherwise pick the first SpawnLocation we can find anywhere in the
-	-- world (Workspace:FindFirstChildOfClass is non-recursive, which is
-	-- why a SpawnLocation parented inside a Folder was being missed).
 	for _, descendant in ipairs(Workspace:GetDescendants()) do
 		if descendant:IsA("SpawnLocation") then
 			return descendant
@@ -239,23 +250,38 @@ local function ResolvePreviewAnchorPart()
 	return nil
 end
 
+-- Place the rig so its feet land on the top face of the chosen anchor
+-- Part. Uses Model:GetBoundingBox so the offset is correct regardless
+-- of race scale or accessory geometry.
 local previewAnchorWarned = false
-local function GetPreviewAnchorCFrame()
+local function PlaceCharacterOnSpawn(character)
 	local anchor = ResolvePreviewAnchorPart()
-	if anchor then
-		local topY = anchor.Position.Y + anchor.Size.Y * 0.5
-		-- HRP sits 3 studs above the surface so the feet land on it.
-		return CFrame.new(anchor.Position.X, topY + 3, anchor.Position.Z)
-			* (anchor.CFrame - anchor.Position)
+	if not anchor then
+		if not previewAnchorWarned then
+			warn("[CharacterEditorUI] No SpawnLocation or PreviewSpot Part "
+				.. "found in Workspace — falling back to (0, 10, 0). "
+				.. "Add a Part named PreviewSpot where you want the "
+				.. "preview character to stand.")
+			previewAnchorWarned = true
+		end
+		character:PivotTo(CFrame.new(0, 10, 0))
+		return
 	end
-	if not previewAnchorWarned then
-		warn("[CharacterEditorUI] No SpawnLocation or PreviewSpot Part "
-			.. "found in Workspace — falling back to (0, 5, 0). "
-			.. "Add a Part named PreviewSpot where you want the preview "
-			.. "character to stand.")
-		previewAnchorWarned = true
-	end
-	return CFrame.new(0, 5, 0)
+
+	local topY = anchor.Position.Y + anchor.Size.Y * 0.5
+	-- First place the rig somewhere near the anchor so we can read its
+	-- bounding box; the X/Z are correct, only the Y needs adjusting.
+	character:PivotTo(CFrame.new(anchor.Position.X, topY + 5, anchor.Position.Z)
+		* (anchor.CFrame - anchor.Position))
+	local cf, size = character:GetBoundingBox()
+	local feetY = cf.Y - size.Y * 0.5
+	local correction = topY - feetY
+	character:PivotTo(character:GetPivot() + Vector3.new(0, correction, 0))
+	print(("[CharacterEditorUI] Preview anchor: %s @ (%.1f, %.1f, %.1f), "
+		.. "rig feet placed at Y=%.1f"):format(
+			anchor:GetFullName(),
+			anchor.Position.X, anchor.Position.Y, anchor.Position.Z,
+			topY))
 end
 
 -- Lock the rig in place by anchoring ONLY the HumanoidRootPart. Body
@@ -296,13 +322,26 @@ function CharacterEditorUI.UpdatePreview()
 		warn("CharacterEditorUI: cannot create world preview character")
 		return
 	end
-	character.Name = "TBATE_PreviewCharacter"
+	-- Use a name that won't show up over the character; the floating
+	-- "TBATE_PreviewCharacter" label was distracting.
+	character.Name = "PreviewCharacter"
 
 	local primary = character.PrimaryPart or character:FindFirstChild("HumanoidRootPart")
 	if primary then
 		character.PrimaryPart = primary
-		character:PivotTo(GetPreviewAnchorCFrame())
 	end
+
+	-- R6 ignores HumanoidDescription scale fields, so apply the race
+	-- height ratio uniformly via Model:ScaleTo. Do this BEFORE placing
+	-- the rig so the bounding-box-based foot alignment uses the post-
+	-- scale dimensions.
+	local raceData = CharacterConfig.RACES[currentRace]
+	local raceScale = (raceData and raceData.HeightScale) or 1.0
+	pcall(function()
+		character:ScaleTo(raceScale)
+	end)
+
+	PlaceCharacterOnSpawn(character)
 	character.Parent = Workspace
 	AnchorRig(character)
 	worldCharacter = character

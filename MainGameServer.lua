@@ -18,6 +18,8 @@ local RACES = {
 		WidthScale = 1.0,
 		HeadScale = 1.0,
 		BodyTypeScale = 1.0,
+		HasEars = false,
+		EarAssetId = nil,
 	},
 	Elf = {
 		Name = "Эльф",
@@ -25,6 +27,8 @@ local RACES = {
 		WidthScale = 0.95,
 		HeadScale = 1.0,
 		BodyTypeScale = 0.95,
+		HasEars = true,
+		EarAssetId = 242662351524411,
 	},
 	Dwarf = {
 		Name = "Дварф",
@@ -32,31 +36,75 @@ local RACES = {
 		WidthScale = 1.15,
 		HeadScale = 1.1,
 		BodyTypeScale = 1.2,
+		HasEars = false,
+		EarAssetId = nil,
 	}
 }
 
--- Build a HumanoidDescription pre-populated with race scales / character
--- colors. Used to spawn a fresh R6 character so the rig is always blocky.
+-- Asset ID лежат в HumanoidDescription.HairAccessory / Shirt / Pants;
+-- держим список в этом скрипте чтобы не дёргать общий конфиг (это
+-- standalone-скрипт для Place 2).
+local HAIRSTYLES = {
+	[1] = 97714842615043,
+	[2] = 93559114730036,
+	[3] = 140687194936636,
+	[4] = 0,
+}
+local SHIRTS = {
+	[1] = 607785314,
+	[2] = 607702162,
+	[3] = 1340912704,
+}
+local PANTS = {
+	[1] = 607786413,
+	[2] = 86896501,
+	[3] = 1340912869,
+}
+
+-- Build a HumanoidDescription that fully matches what the player picked
+-- in the editor: race scales, skin color, hair, ears, shirt, pants. Used
+-- to spawn a fresh R6 character so the rig is always blocky.
 local function BuildDescription(characterData)
 	local description = Instance.new("HumanoidDescription")
-	if characterData then
-		local race = RACES[characterData.Race]
-		if race then
-			description.HeightScale = race.HeightScale
-			description.WidthScale = race.WidthScale
-			description.HeadScale = race.HeadScale
-			description.BodyTypeScale = race.BodyTypeScale
-		end
-		if characterData.SkinColor then
-			local c = characterData.SkinColor
-			description.HeadColor = c
-			description.TorsoColor = c
-			description.LeftArmColor = c
-			description.RightArmColor = c
-			description.LeftLegColor = c
-			description.RightLegColor = c
+	if not characterData then
+		return description
+	end
+
+	local race = RACES[characterData.Race]
+	if race then
+		description.HeightScale = race.HeightScale
+		description.WidthScale = race.WidthScale
+		description.HeadScale = race.HeadScale
+		description.BodyTypeScale = race.BodyTypeScale
+		if race.HasEars and race.EarAssetId and race.EarAssetId > 0 then
+			description.HatAccessory = tostring(race.EarAssetId)
 		end
 	end
+
+	if characterData.SkinColor then
+		local c = characterData.SkinColor
+		description.HeadColor = c
+		description.TorsoColor = c
+		description.LeftArmColor = c
+		description.RightArmColor = c
+		description.LeftLegColor = c
+		description.RightLegColor = c
+	end
+
+	local hairId = HAIRSTYLES[characterData.HairstyleIndex]
+	if hairId and hairId > 0 then
+		description.HairAccessory = tostring(hairId)
+	end
+
+	local shirtId = SHIRTS[characterData.ShirtIndex]
+	if shirtId and shirtId > 0 then
+		description.Shirt = shirtId
+	end
+	local pantsId = PANTS[characterData.PantsIndex]
+	if pantsId and pantsId > 0 then
+		description.Pants = pantsId
+	end
+
 	return description
 end
 
@@ -85,45 +133,41 @@ local function ApplyRaceModifications(character, race)
 	print("Applied race modifications:", race, "to", character.Name)
 end
 
--- Tint every hair-style accessory currently parented to the character
+-- Tint every hair-style accessory currently parented to the character.
+-- Mirrors the client logic: covers BasePart.Color, SpecialMesh.VertexColor,
+-- and SurfaceAppearance.ColorMap so the chosen color shows up regardless
+-- of how the catalog asset was authored.
 local function TintHair(character, color)
 	if not color then return end
 	for _, descendant in ipairs(character:GetDescendants()) do
-		if descendant:IsA("Accessory") and descendant.AccessoryType == Enum.AccessoryType.Hair then
-			for _, part in ipairs(descendant:GetDescendants()) do
-				if part:IsA("BasePart") or part:IsA("MeshPart") then
-					part.Color = color
+		if descendant:IsA("Accessory") then
+			local isHair = descendant.AccessoryType == Enum.AccessoryType.Hair
+			if not isHair then
+				isHair = descendant.Name:lower():find("hair") ~= nil
+			end
+			if isHair then
+				for _, part in ipairs(descendant:GetDescendants()) do
+					if part:IsA("BasePart") then
+						part.Color = color
+					elseif part:IsA("SpecialMesh") then
+						part.VertexColor = Vector3.new(color.R, color.G, color.B)
+					elseif part:IsA("SurfaceAppearance") then
+						pcall(function()
+							part.ColorMap = ""
+							part.AlphaMode = Enum.AlphaMode.Overlay
+						end)
+					end
 				end
 			end
 		end
 	end
 end
 
--- Применить внешность персонажа
+-- BuildDescription уже включает hair / shirt / pants / ears / colors,
+-- так что ApplyAppearance остаётся только подкрасить волосы (это
+-- делается после ApplyDescription, чтобы не быть перезаписанным).
 local function ApplyAppearance(character, characterData)
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then return end
-	
-	local humanoidDescription = humanoid:GetAppliedDescription()
-	
-	-- Применить цвет кожи
-	if characterData.SkinColor then
-		local color = characterData.SkinColor
-		humanoidDescription.HeadColor = color
-		humanoidDescription.TorsoColor = color
-		humanoidDescription.LeftArmColor = color
-		humanoidDescription.RightArmColor = color
-		humanoidDescription.LeftLegColor = color
-		humanoidDescription.RightLegColor = color
-	end
-	
-	-- TODO: Применить прическу и одежду по AssetId
-	
-	humanoid:ApplyDescription(humanoidDescription)
-	
-	-- Применить цвет волос (после ApplyDescription)
 	TintHair(character, characterData.HairColor)
-	
 	print("Applied appearance to", character.Name)
 end
 
@@ -161,6 +205,15 @@ local function SpawnCharacter(player, characterData)
 		humanoid.RigType = Enum.HumanoidRigType.R6
 		humanoid.DisplayName = player.DisplayName
 	end
+
+	-- R6 ignores HumanoidDescription scale fields, so apply the race
+	-- height ratio uniformly via Model:ScaleTo. Same approach as the
+	-- editor preview so the spawned character matches it visually.
+	local raceData = characterData and RACES[characterData.Race]
+	local raceScale = (raceData and raceData.HeightScale) or 1.0
+	pcall(function()
+		character:ScaleTo(raceScale)
+	end)
 
 	local rootPart = character:FindFirstChild("HumanoidRootPart")
 	if rootPart then

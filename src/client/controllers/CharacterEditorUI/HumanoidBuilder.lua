@@ -3,8 +3,8 @@
 -- HumanoidDescription. No editor state lives here — every function
 -- takes the rig (and any colour) it operates on.
 --
--- Used by both the in-world preview (CharacterEditorUI/init.lua) and
--- the mini-preview thumbnails (UIBuilder.CreateMiniPreviewButton).
+-- Intended to be called from whatever LocalScript is wiring up the
+-- hand-built character editor / mini-preview thumbnails.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

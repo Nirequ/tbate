@@ -1,137 +1,41 @@
 -- Client initialization script
--- Manages character creation flow and UI
+--
+-- The Lua-side UI builders (SlotSelectionUI / CharacterEditorUI) have
+-- been removed; the player-facing UI is now expected to live in
+-- StarterGui as hand-built ScreenGuis (Studio UI Editor). This file
+-- only initialises the data-layer controller so the rest of the code
+-- on the client can still talk to the server.
+--
+-- Helpers that don't build UI but might be useful when wiring the
+-- hand-built UI to the game state remain available:
+--
+--   require(script.controllers.CharacterController)
+--     thin wrapper around the slot-management RemoteFunctions
+--     (GetCharacterSlots / CreateCharacter / LoadCharacter /
+--     UnlockSlot / TeleportToMainGame / ResetCharacterSlots).
+--
+--   require(script.controllers.CharacterEditorUI.HumanoidBuilder)
+--     pure helpers for turning a selection table into a
+--     HumanoidDescription and for spawning an R6 rig coloured to it.
+--
+--   require(script.controllers.CharacterEditorUI.PreviewSpawn)
+--     resolves the Workspace.PreviewSpot anchor and stands a rig on
+--     top of it without it sinking through the floor or floating.
+--
+--   require(script.controllers.CharacterEditorUI.OrbitCamera)
+--     mouse-drag orbit + scroll-zoom around a preview character.
+--
+-- These can be required directly from LocalScripts attached to the
+-- hand-built UI; nothing in this init.client.lua needs to drive them.
 
 print("=== TBATE RPG Client Starting ===")
 
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- Wait for player
 local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
+player:WaitForChild("PlayerGui")
 
--- Load modules
-local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CharacterController = require(script.controllers.CharacterController)
-local SlotSelectionUI = require(script.controllers.SlotSelectionUI)
-local CharacterEditorUI = require(script.controllers.CharacterEditorUI)
-
--- Initialize controller
 CharacterController.Init()
-
--- UI state
-local currentUI = nil
-local currentSlotIndex = nil
-
--- Forward declarations
-local ShowSlotSelection
-local ShowCharacterEditor
-
--- Show character editor screen
-ShowCharacterEditor = function()
-	-- Clean up previous UI
-	if currentUI then
-		currentUI:Destroy()
-		currentUI = nil
-	end
-	
-	-- Create and show character editor UI
-	local editorUI = CharacterEditorUI.CreateUI()
-	CharacterEditorUI.InitializeDefaults(editorUI)
-	
-	-- Setup handlers
-	CharacterEditorUI.SetupHandlers(editorUI, 
-		function()
-			-- Back button - return to slot selection
-			print("Returning to slot selection")
-			ShowSlotSelection()
-		end,
-		function(characterData)
-			-- Confirm button - save character
-			print("Saving character to slot", currentSlotIndex)
-			
-			local success, message = CharacterController.CreateCharacter(currentSlotIndex, characterData)
-			
-			if success then
-				print("Character created successfully!")
-				
-				-- Load the character
-				local loadSuccess, loadMessage = CharacterController.LoadCharacter(currentSlotIndex)
-				
-				if loadSuccess then
-					print("Character loaded!")
-					-- Teleport to main game after a short delay
-					task.wait(2)
-					CharacterController.TeleportToMainGame()
-				else
-					warn("Failed to load character:", loadMessage)
-				end
-			else
-				warn("Failed to create character:", message)
-			end
-		end
-	)
-	
-	currentUI = editorUI
-	print("Character editor UI ready")
-end
-
--- Show slot selection screen
-ShowSlotSelection = function()
-	-- Clean up previous UI
-	if currentUI then
-		currentUI:Destroy()
-		currentUI = nil
-	end
-	
-	print("Loading character slots...")
-	local slotsData = CharacterController.GetCharacterSlots()
-	
-	if not slotsData then
-		warn("Failed to load character slots!")
-		return
-	end
-	
-	-- Create and show slot selection UI
-	local slotUI = SlotSelectionUI.CreateUI()
-	SlotSelectionUI.UpdateUI(slotUI, slotsData)
-	
-	-- Setup handlers
-	SlotSelectionUI.SetupHandlers(slotUI, slotsData, function(slotIndex, characterData)
-		currentSlotIndex = slotIndex
-
-		if characterData then
-			-- Character exists, load it
-			print("Loading existing character from slot", slotIndex)
-			local success, message = CharacterController.LoadCharacter(slotIndex)
-
-			if success then
-				print("Character loaded successfully!")
-				-- Teleport to main game
-				task.wait(1)
-				CharacterController.TeleportToMainGame()
-			else
-				warn("Failed to load character:", message)
-			end
-		else
-			-- No character, show editor
-			print("Creating new character in slot", slotIndex)
-			ShowCharacterEditor()
-		end
-	end, function()
-		-- [DEBUG] Reset slots: re-show this screen so the wiped state
-		-- is reflected (slots 2/3 locked again, slot 1 empty).
-		print("Slots reset; refreshing slot selection")
-		ShowSlotSelection()
-	end)
-	
-	currentUI = slotUI
-	print("Slot selection UI ready")
-end
-
--- Start the character creation flow
-print("Starting character creation flow...")
-task.wait(1) -- Wait for everything to load
-ShowSlotSelection()
 
 print("=== TBATE RPG Client Ready ===")

@@ -31,7 +31,7 @@ CharacterConfig.RACES = {
 		HeadScale = 1.0,
 		BodyTypeScale = 0.95,
 		HasEars = true,
-		EarAssetId = 242662351524411  -- TODO: Add elf ear accessory asset ID
+		EarAssetId = 242662351524411
 	},
 	Dwarf = {
 		Name = "Дварф",
@@ -47,58 +47,34 @@ CharacterConfig.RACES = {
 
 -- Available hairstyles (catalog asset IDs)
 CharacterConfig.HAIRSTYLES = {
-	{Name = "Короткие волосы", AssetId = 97714842615043},  -- Roblox Boy Hair
-	{Name = "Длинные волосы", AssetId = 93559114730036},    -- Beautiful Hair
-	{Name = "Женские длинные", AssetId = 140687194936636},           -- Pigtails
+	{Name = "Короткие волосы", AssetId = 97714842615043},
+	{Name = "Длинные волосы", AssetId = 93559114730036},
+	{Name = "Женские длинные", AssetId = 140687194936636},
 	{Name = "Лысый", AssetId = 0}
 }
 
 -- Available clothing options (catalog asset IDs)
 CharacterConfig.CLOTHING = {
 	Shirts = {
-		{Name = "Простая рубашка", AssetId = 607785314},    -- Red Roblox Jacket
-		{Name = "Кожаная броня", AssetId = 607702162},      -- Leather Vest
-		{Name = "Магическая роба", AssetId = 1340912704}    -- Wizard Robe
+		{Name = "Shirt 1", AssetId = 113764433325496},
+		{Name = "Shirt 2", AssetId = 5261079458},
+		{Name = "Shirt 3", AssetId = 113319764815263}
 	},
 	Pants = {
-		{Name = "Простые штаны", AssetId = 607786413},      -- Jeans
-		{Name = "Кожаные штаны", AssetId = 86896501},       -- Leather Pants
-		{Name = "Магические штаны", AssetId = 1340912869}   -- Wizard Pants
+		{Name = "Pants 1", AssetId = 1736042024},
+		{Name = "Pants 2", AssetId = 12551073709},
+		{Name = "Pants 3", AssetId = 9157798320}
 	}
 }
 
--- Available skin colors (palette swatches shown in the editor)
-CharacterConfig.SKIN_COLORS = {
-	{Name = "Светлая",       Color = Color3.fromRGB(255, 220, 192)},
-	{Name = "Бежевая",       Color = Color3.fromRGB(255, 204, 153)},
-	{Name = "Загорелая",     Color = Color3.fromRGB(217, 156, 105)},
-	{Name = "Смуглая",       Color = Color3.fromRGB(165, 110,  65)},
-	{Name = "Тёмная",        Color = Color3.fromRGB(110,  70,  40)},
-	{Name = "Очень тёмная",  Color = Color3.fromRGB( 60,  40,  25)},
-	{Name = "Эльфийская",    Color = Color3.fromRGB(245, 230, 220)},
-}
-
--- Available hair colors (palette swatches shown in the editor)
-CharacterConfig.HAIR_COLORS = {
-	{Name = "Чёрный",      Color = Color3.fromRGB( 25,  20,  20)},
-	{Name = "Каштановый",  Color = Color3.fromRGB( 80,  50,  30)},
-	{Name = "Коричневый",  Color = Color3.fromRGB(139,  69,  19)},
-	{Name = "Русый",       Color = Color3.fromRGB(170, 130,  80)},
-	{Name = "Блонд",       Color = Color3.fromRGB(230, 200, 130)},
-	{Name = "Платиновый",  Color = Color3.fromRGB(240, 235, 220)},
-	{Name = "Рыжий",       Color = Color3.fromRGB(200,  90,  30)},
-	{Name = "Серебряный",  Color = Color3.fromRGB(190, 195, 200)},
-	{Name = "Синий",       Color = Color3.fromRGB( 40,  90, 180)},
-}
-
--- Default character appearance
+-- Default character appearance. Skin/hair colors are picked freely via the
+-- in-game RGB color picker, so we only ship one set of starting Color3
+-- values here — no palette indices.
 CharacterConfig.DEFAULT_CHARACTER = {
 	Race = "Human",
 	HairstyleIndex = 1,
 	ShirtIndex = 1,
 	PantsIndex = 1,
-	SkinColorIndex = 2,
-	HairColorIndex = 3,
 	SkinColor = Color3.fromRGB(255, 204, 153),
 	HairColor = Color3.fromRGB(139, 69, 19)
 }
@@ -106,6 +82,6 @@ CharacterConfig.DEFAULT_CHARACTER = {
 -- Teleport configuration
 -- ВАЖНО: Замените 0 на Place ID вашего основного игрового места
 -- Получить Place ID можно на create.roblox.com в разделе Places
-CharacterConfig.MAIN_GAME_PLACE_ID = 87736930204659  -- TODO: Set your main game place ID
+CharacterConfig.MAIN_GAME_PLACE_ID = 87736930204659
 
 return CharacterConfig

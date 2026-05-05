@@ -79,6 +79,7 @@ function CharacterController.InitializeDefaultCharacter()
 	currentCharacterData = {
 		Race = CharacterConfig.DEFAULT_CHARACTER.Race,
 		HairstyleIndex = CharacterConfig.DEFAULT_CHARACTER.HairstyleIndex,
+		FaceIndex = CharacterConfig.DEFAULT_CHARACTER.FaceIndex,
 		ShirtIndex = CharacterConfig.DEFAULT_CHARACTER.ShirtIndex,
 		PantsIndex = CharacterConfig.DEFAULT_CHARACTER.PantsIndex,
 		SkinColor = CharacterConfig.DEFAULT_CHARACTER.SkinColor,

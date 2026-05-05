@@ -30,6 +30,7 @@ local DEFAULT_HAIR = CharacterConfig.DEFAULT_CHARACTER.HairColor or Color3.fromR
 
 local currentRace = "Human"
 local currentHairstyle = 1
+local currentFace = CharacterConfig.DEFAULT_CHARACTER.FaceIndex or 1
 local currentShirt = 1
 local currentPants = 1
 local currentSkinColor = DEFAULT_SKIN
@@ -190,6 +191,11 @@ local function BuildCurrentDescription()
 		description.HairAccessory = tostring(hairstyle.AssetId)
 	end
 
+	local face = CharacterConfig.FACES[currentFace]
+	if face and face.AssetId and face.AssetId > 0 then
+		description.Face = face.AssetId
+	end
+
 	local shirt = CharacterConfig.CLOTHING.Shirts[currentShirt]
 	if shirt and shirt.AssetId and shirt.AssetId > 0 then
 		description.Shirt = shirt.AssetId
@@ -224,6 +230,8 @@ local function BuildSingleAssetDescription(kind, asset)
 	if asset and asset.AssetId and asset.AssetId > 0 then
 		if kind == "hair" then
 			description.HairAccessory = tostring(asset.AssetId)
+		elseif kind == "face" then
+			description.Face = asset.AssetId
 		elseif kind == "shirt" then
 			description.Shirt = asset.AssetId
 		elseif kind == "pants" then
@@ -753,6 +761,12 @@ local function CreateMiniPreviewButton(id, displayName, kind, asset)
 			-- the view a touch downwards, so the rig sits higher in the
 			-- thumbnail and we can see more of the hair on top.
 			camera.CFrame = CFrame.lookAt(Vector3.new(0, 2.0, -3.2), Vector3.new(0, 1.5, 0))
+		elseif kind == "face" then
+			-- Tight close-up on the front of the head so the face decal
+			-- (eyes + mouth) is fully readable. Head center is at y≈1.5.
+			-- BuildSingleAssetDescription leaves hair off for face minis
+			-- so the decal isn't covered by a fringe.
+			camera.CFrame = CFrame.lookAt(Vector3.new(0, 1.5, -2.2), Vector3.new(0, 1.5, 0))
 		elseif kind == "shirt" then
 			-- Torso center is at y=0; pull camera back enough that the
 			-- whole shirt (HRP±1) is comfortably in frame.
@@ -1096,9 +1110,19 @@ function CharacterEditorUI.CreateUI()
 		btn.Parent = hairContent
 	end
 
+	-- Face section.
+	local faceSection, faceContent = CreateSection(optionsPanel, "FaceSection", "ЛИЦО")
+	faceSection.LayoutOrder = 3
+	MakeGridContainer(faceContent, UDim2.new(0, 92, 0, 110))
+	for i, face in ipairs(CharacterConfig.FACES) do
+		local btn = CreateMiniPreviewButton("Face" .. i, face.Name, "face", face)
+		btn.LayoutOrder = i
+		btn.Parent = faceContent
+	end
+
 	-- Shirt section.
 	local shirtSection, shirtContent = CreateSection(optionsPanel, "ShirtSection", "РУБАШКА")
-	shirtSection.LayoutOrder = 3
+	shirtSection.LayoutOrder = 4
 	MakeGridContainer(shirtContent, UDim2.new(0, 92, 0, 110))
 	for i, shirt in ipairs(CharacterConfig.CLOTHING.Shirts) do
 		local btn = CreateMiniPreviewButton("Shirt" .. i, shirt.Name, "shirt", shirt)
@@ -1108,7 +1132,7 @@ function CharacterEditorUI.CreateUI()
 
 	-- Pants section.
 	local pantsSection, pantsContent = CreateSection(optionsPanel, "PantsSection", "ШТАНЫ")
-	pantsSection.LayoutOrder = 4
+	pantsSection.LayoutOrder = 5
 	MakeGridContainer(pantsContent, UDim2.new(0, 92, 0, 110))
 	for i, pants in ipairs(CharacterConfig.CLOTHING.Pants) do
 		local btn = CreateMiniPreviewButton("Pants" .. i, pants.Name, "pants", pants)
@@ -1118,7 +1142,7 @@ function CharacterEditorUI.CreateUI()
 
 	-- Skin colour picker.
 	local skinSection, skinContent = CreateSection(optionsPanel, "SkinColorSection", "ЦВЕТ КОЖИ")
-	skinSection.LayoutOrder = 5
+	skinSection.LayoutOrder = 6
 	skinPickerRef = CreateRGBColorPicker("SkinPicker", currentSkinColor, function(color)
 		currentSkinColor = color
 		if worldCharacter then
@@ -1129,7 +1153,7 @@ function CharacterEditorUI.CreateUI()
 
 	-- Hair colour picker.
 	local hairColorSection, hairColorContent = CreateSection(optionsPanel, "HairColorSection", "ЦВЕТ ВОЛОС")
-	hairColorSection.LayoutOrder = 6
+	hairColorSection.LayoutOrder = 7
 	hairPickerRef = CreateRGBColorPicker("HairPicker", currentHairColor, function(color)
 		currentHairColor = color
 		if worldCharacter then
@@ -1249,6 +1273,19 @@ function CharacterEditorUI.SetupHandlers(screenGui, onBack, onConfirm)
 		end
 	end
 
+	-- Face buttons.
+	for i in ipairs(CharacterConfig.FACES) do
+		local id = "Face" .. i
+		local btn = optionsPanel:FindFirstChild(id, true)
+		if btn then
+			btn.MouseButton1Click:Connect(function()
+				currentFace = i
+				CharacterEditorUI.UpdateSelection(nil, "FaceSection", id)
+				CharacterEditorUI.UpdatePreview()
+			end)
+		end
+	end
+
 	-- Shirt buttons.
 	for i in ipairs(CharacterConfig.CLOTHING.Shirts) do
 		local id = "Shirt" .. i
@@ -1296,6 +1333,7 @@ function CharacterEditorUI.SetupHandlers(screenGui, onBack, onConfirm)
 				local characterData = {
 					Race = currentRace,
 					HairstyleIndex = currentHairstyle,
+					FaceIndex = currentFace,
 					ShirtIndex = currentShirt,
 					PantsIndex = currentPants,
 					SkinColor = currentSkinColor,
@@ -1322,6 +1360,7 @@ end
 function CharacterEditorUI.InitializeDefaults(_)
 	CharacterEditorUI.UpdateSelection(nil, "RaceSection", currentRace)
 	CharacterEditorUI.UpdateSelection(nil, "HairstyleSection", "Hairstyle" .. currentHairstyle)
+	CharacterEditorUI.UpdateSelection(nil, "FaceSection", "Face" .. currentFace)
 	CharacterEditorUI.UpdateSelection(nil, "ShirtSection", "Shirt" .. currentShirt)
 	CharacterEditorUI.UpdateSelection(nil, "PantsSection", "Pants" .. currentPants)
 end

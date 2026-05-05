@@ -42,6 +42,7 @@ function DataStore.SaveCharacter(player, slotIndex, characterData)
 	local dataToSave = {
 		Race = characterData.Race,
 		HairstyleIndex = characterData.HairstyleIndex,
+		FaceIndex = characterData.FaceIndex,
 		ShirtIndex = characterData.ShirtIndex,
 		PantsIndex = characterData.PantsIndex,
 		SkinColor = {characterData.SkinColor.R, characterData.SkinColor.G, characterData.SkinColor.B},

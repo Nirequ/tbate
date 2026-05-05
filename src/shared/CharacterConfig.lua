@@ -53,6 +53,19 @@ CharacterConfig.HAIRSTYLES = {
 	{Name = "Лысый", AssetId = 0}
 }
 
+-- Available faces (catalog Decal asset IDs). Roblox stores a face as a
+-- single decal that lives on the front of the head — eyes and mouth
+-- are baked into the same image, so each entry here is a complete
+-- expression. Swap these IDs for whatever Public Decals you want; the
+-- ones below are stock Roblox faces.
+CharacterConfig.FACES = {
+	{Name = "Улыбка",     AssetId = 7074786},
+	{Name = "Весёлый",    AssetId = 28999228},
+	{Name = "Хитрый",     AssetId = 7074774},
+	{Name = "Удивлённый", AssetId = 7074825},
+	{Name = "Без лица",   AssetId = 0}
+}
+
 -- Available clothing options (catalog asset IDs)
 CharacterConfig.CLOTHING = {
 	Shirts = {
@@ -73,6 +86,7 @@ CharacterConfig.CLOTHING = {
 CharacterConfig.DEFAULT_CHARACTER = {
 	Race = "Human",
 	HairstyleIndex = 1,
+	FaceIndex = 1,
 	ShirtIndex = 1,
 	PantsIndex = 1,
 	SkinColor = Color3.fromRGB(255, 204, 153),

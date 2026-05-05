@@ -83,7 +83,15 @@ function CharacterService.ApplyAppearance(character, characterData)
 			humanoidDescription.HairAccessory = ""
 		end
 	end
-	
+
+	-- Apply face decal (eyes + mouth as a single image).
+	if characterData.FaceIndex then
+		local face = CharacterConfig.FACES[characterData.FaceIndex]
+		if face and face.AssetId and face.AssetId > 0 then
+			humanoidDescription.Face = face.AssetId
+		end
+	end
+
 	-- Apply clothing
 	if characterData.ShirtIndex then
 		local shirt = CharacterConfig.CLOTHING.Shirts[characterData.ShirtIndex]

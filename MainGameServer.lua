@@ -41,24 +41,33 @@ local RACES = {
 	}
 }
 
--- Asset ID лежат в HumanoidDescription.HairAccessory / Shirt / Pants;
--- держим список в этом скрипте чтобы не дёргать общий конфиг (это
--- standalone-скрипт для Place 2).
+-- Asset ID лежат в HumanoidDescription.HairAccessory / Face / Shirt /
+-- Pants; держим список в этом скрипте чтобы не дёргать общий конфиг
+-- (это standalone-скрипт для Place 2). Если меняешь shared/CharacterConfig
+-- — продублируй значения сюда же, иначе персонаж в основном игровом
+-- месте загрузится со старой одеждой/лицом.
 local HAIRSTYLES = {
 	[1] = 97714842615043,
 	[2] = 93559114730036,
 	[3] = 140687194936636,
 	[4] = 0,
 }
+local FACES = {
+	[1] = 7074786,
+	[2] = 28999228,
+	[3] = 7074774,
+	[4] = 7074825,
+	[5] = 0,
+}
 local SHIRTS = {
-	[1] = 607785314,
-	[2] = 607702162,
-	[3] = 1340912704,
+	[1] = 113764433325496,
+	[2] = 5261079458,
+	[3] = 113319764815263,
 }
 local PANTS = {
-	[1] = 607786413,
-	[2] = 86896501,
-	[3] = 1340912869,
+	[1] = 1736042024,
+	[2] = 12551073709,
+	[3] = 9157798320,
 }
 
 -- Build a HumanoidDescription that fully matches what the player picked
@@ -94,6 +103,11 @@ local function BuildDescription(characterData)
 	local hairId = HAIRSTYLES[characterData.HairstyleIndex]
 	if hairId and hairId > 0 then
 		description.HairAccessory = tostring(hairId)
+	end
+
+	local faceId = FACES[characterData.FaceIndex]
+	if faceId and faceId > 0 then
+		description.Face = faceId
 	end
 
 	local shirtId = SHIRTS[characterData.ShirtIndex]

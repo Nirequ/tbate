@@ -748,8 +748,11 @@ local function CreateMiniPreviewButton(id, displayName, kind, asset)
 		-- framed the chest area, which read as "too low".)
 		if kind == "hair" then
 			-- Show the head + hair. Head center is at y≈1.5, hair tops out
-			-- around y≈3, so look at a point ~y=2.0.
-			camera.CFrame = CFrame.lookAt(Vector3.new(0, 2.0, -3.2), Vector3.new(0, 2.0, 0))
+			-- around y≈3. We aim the look-at slightly below head center
+			-- (y=1.5) while keeping the camera at head height — this tilts
+			-- the view a touch downwards, so the rig sits higher in the
+			-- thumbnail and we can see more of the hair on top.
+			camera.CFrame = CFrame.lookAt(Vector3.new(0, 2.0, -3.2), Vector3.new(0, 1.5, 0))
 		elseif kind == "shirt" then
 			-- Torso center is at y=0; pull camera back enough that the
 			-- whole shirt (HRP±1) is comfortably in frame.

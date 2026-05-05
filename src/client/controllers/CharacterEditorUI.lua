@@ -741,14 +741,24 @@ local function CreateMiniPreviewButton(id, displayName, kind, asset)
 		end)
 
 		-- Frame the camera based on which body region we want to highlight.
+		-- R6 rigs from CreateHumanoidModelFromDescription face -Z (their
+		-- default LookVector), so to see the FRONT of the character the
+		-- camera has to sit at NEGATIVE Z relative to the rig. (The
+		-- previous +Z values were rendering the back of the dummy and
+		-- framed the chest area, which read as "too low".)
 		if kind == "hair" then
-			camera.CFrame = CFrame.lookAt(Vector3.new(0, 2.5, 4), Vector3.new(0, 2.2, 0))
+			-- Show the head + hair. Head center is at y≈1.5, hair tops out
+			-- around y≈3, so look at a point ~y=2.0.
+			camera.CFrame = CFrame.lookAt(Vector3.new(0, 2.0, -3.2), Vector3.new(0, 2.0, 0))
 		elseif kind == "shirt" then
-			camera.CFrame = CFrame.lookAt(Vector3.new(0, 0.5, 5), Vector3.new(0, 0.5, 0))
+			-- Torso center is at y=0; pull camera back enough that the
+			-- whole shirt (HRP±1) is comfortably in frame.
+			camera.CFrame = CFrame.lookAt(Vector3.new(0, 0.2, -4.5), Vector3.new(0, 0.2, 0))
 		elseif kind == "pants" then
-			camera.CFrame = CFrame.lookAt(Vector3.new(0, -1.5, 5), Vector3.new(0, -1.5, 0))
+			-- Legs span y=-3..-1. Center the look at y=-2.
+			camera.CFrame = CFrame.lookAt(Vector3.new(0, -2.0, -3.5), Vector3.new(0, -2.0, 0))
 		else
-			camera.CFrame = CFrame.lookAt(Vector3.new(0, 0, 6), Vector3.new(0, 0, 0))
+			camera.CFrame = CFrame.lookAt(Vector3.new(0, 0, -6), Vector3.new(0, 0, 0))
 		end
 	end)
 

@@ -76,7 +76,7 @@ CharacterConfig.DEFAULT_CHARACTER = {
 	ShirtIndex = 1,
 	PantsIndex = 1,
 	SkinColor = Color3.fromRGB(255, 204, 153),
-	HairColor = Color3.fromRGB(139, 69, 19)
+	HairColor = Color3.fromRGB(255, 255, 255)
 }
 
 -- Teleport configuration

@@ -11,13 +11,15 @@ local Workspace = game:GetService("Workspace")
 -- в воркспейсе.
 Players.CharacterAutoLoads = false
 
--- Отключаем streaming для editor-плейса. Здесь маленькая площадка
--- (SpawnLocation / PreviewSpot + декорации), streaming только мешает:
--- если SpawnLocation далеко от стартовой позиции камеры клиента,
--- streaming его не подгружает, и наш клиентский поиск
--- Workspace:FindFirstChild("PreviewSpot", true) ничего не находит.
--- В Place 2 (основной мир) можно держать streaming включённым.
-Workspace.StreamingEnabled = false
+-- Streaming для editor-плейса должен быть выключен вручную в свойствах
+-- Workspace (в Studio: выбираем Workspace → Properties → StreamingEnabled
+-- = false). Делать это из обычного Script больше нельзя — Roblox
+-- требует script capability "Plugin", которой у нас нет, и попытка
+-- присвоить значение бросает ошибку и обрывает init-скрипт. Но если
+-- вдруг capability однажды появится, оборачиваем в pcall.
+pcall(function()
+	Workspace.StreamingEnabled = false
+end)
 
 -- Load shared modules
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
